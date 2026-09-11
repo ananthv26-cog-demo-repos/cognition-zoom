@@ -1,6 +1,6 @@
 ---
 name: zoom-meeting
-description: Create a host-less Zoom meeting via the Zoom REST API (Server-to-Server OAuth) and join it from a Devin VM as a named guest through the Zoom desktop app (macOS + BlackHole, Linux + PulseAudio null sinks, Windows + VB-Audio cables; plain Chrome/Edge web client as fallback). Use for multi-Devin Zoom demos (parent creates the meeting, children join with display names/personas and virtual-audio mics).
+description: Create a host-less Zoom meeting via the Zoom REST API (Server-to-Server OAuth) and join it from a Devin VM as a named guest through the Zoom desktop app (macOS + BlackHole, Linux + PulseAudio null sinks, Windows + VB-Audio cables; plain Chrome/Edge web client as fallback). Use for multi-Devin Zoom demos (parent creates the meeting, children join with display names/personas and virtual-audio mics), for the fast in-process conversation loop (converse.py), and for the opt-in Wispr Flow Notetaker on macOS (only when the prompt says "wispr").
 ---
 
 # Zoom meeting: create + join from a Devin VM
@@ -111,6 +111,10 @@ Gotchas:
   Use `?archType=arm64` (or install Rosetta). `join_zoom.sh` auto mode checks `lipo -archs` against `uname -m`
   and falls back to Chrome/Safari when the installed app is the wrong architecture.
 - Prefer `--end` over `--delete` for cleanup; both need their scope on the app (400/4711 otherwise).
+- `show_meeting_window.sh --snapshot` lists Zoom's windows as `<CG window number>\t<title>` via `osascript -l
+  JavaScript`. On macOS 26 `ObjC.deepUnwrap($.CFBridgingRelease(list))` segfaults the whole osascript (status 139,
+  "could not enumerate Zoom windows") and `join_zoom.sh` then refuses to fire the deep link (`zoom state: enum-failed`);
+  `ObjC.castRefToObject(list)` is the working form. If you ever see status 139 there, that regression is back.
 
 ### Web client alternatives on macOS (both verified, no bot block)
 - **Plain Chrome** (`brew install --cask google-chrome`, ~28 s; `ZOOM_JOIN_MODE=chrome scripts/join_zoom.sh <web_client_url>`):
@@ -262,7 +266,40 @@ Does **not** work as a join path: the preview loads (after Edge's one-time welco
 endpoints, but **Join** returns "Automated bots aren't allowed to join this meeting" (reCAPTCHA) even in plain,
 non-automated Edge — unlike plain Chrome on Linux/macOS. Use the desktop app.
 
-## 5. Talking like a person (ElevenLabs, `ELEVENLABS_API_KEY`)
+## 5. Talking like a person (ElevenLabs, `ELEVENLABS_API_KEY`) — and the fast loop (`converse.py`, `FIREWORKS_API_KEY`)
+
+**Default for conversations: `scripts/converse.py`**, not a hand-driven listen/speak loop. One agent step per
+turn (screenshot + reasoning + tool round-trips) was the latency: 20-40 s between hearing a line and answering
+it. `converse.py` runs listen -> transcribe -> chat model -> TTS -> speak in one process; the model call is
+~1 s (Fireworks `glm-5p3-fast`), so a turn is bounded by the speech itself (~1.2 s silence + Scribe ~3 s + TTS ~3 s).
+Nothing is scripted: each line is generated live from the persona, the roster, the running transcript and a
+steer file you edit between turns; the model can answer `PASS` (not addressed to me) or end with `DONE` (said goodbye).
+
+```bash
+python3 scripts/converse.py --name "Mac VM 1" --voice Roger --check      # preflight: keys, voice, one model call (~2 s)
+cat > ~/persona.md <<'EOF'
+Infrastructure/CI engineer. This week: cached VM snapshots between pipeline runs (12 min -> 4 min), rotating
+runner images tonight. Wants: a review on the pipeline PR before the release cut.
+EOF
+echo "Keep it to 4-5 of your own lines, then wrap up." > ~/steer.txt
+python3 scripts/converse.py --name "Mac VM 1" --voice Roger --persona ~/persona.md \
+    --roster "Mac VM 2 (frontend), Windows VM (QA)" --steer ~/steer.txt --log ~/turns.jsonl \
+    --open "Hi Mac VM 2, Mac VM 1 here. Quick standup: what have you been working on?"   # opener only; others omit --open
+# while it runs (own shell, 10-15 min timeout): append to ~/steer.txt to steer ("ask Mac VM 2 what they need by
+# Friday"), tail ~/turns.jsonl (heard/said/pass with timestamps), append a line `STOP` to take over with listen/speak.
+```
+
+- Keys: `ELEVENLABS_API_KEY` (Scribe + TTS) and `FIREWORKS_API_KEY` (org secret). There is no OpenAI fallback
+  on purpose. `ZOOM_LLM_MODEL` overrides the model; probed 2026-09: `accounts/fireworks/routers/glm-5p3-fast`
+  (default, 0.5-1.3 s), `accounts/fireworks/models/deepseek-v4p1-flash`, `accounts/fireworks/routers/kimi-k3-fast`.
+  `gpt-oss`/`nemotron` put everything in reasoning and are unusable. `llama-v3p3-70b-instruct` 404s on this account.
+- Secrets are injected at session start: a child started before a secret was saved never sees it. Run `--check`
+  first thing; if it exits on a missing key, report it and stop (do not join half-configured).
+- The model only ever speaks its final `SAY:` line; reasoning is never sent to TTS.
+- If every listen comes back empty while the other VM is audibly talking (Wispr shows their line, listen.py does
+  not), the Zoom **speaker** is on the wrong device — Zoom defaults it to BlackHole 2ch (the mic); set 16ch.
+
+### Manual loop (fallback / when you want to think per turn yourself)
 
 ```bash
 scripts/speak.py --list-voices                     # Roger, Sarah, George, ... (pick one per Devin persona)
@@ -310,13 +347,18 @@ A prompt like "have 2 Mac VMs and 1 Windows VM join the same Zoom and chat with 
    ...), a persona, an ElevenLabs voice
    (`--voice Roger|Sarah|George|...`), the join URL (Mac/Linux: `scripts/join_zoom.sh "<join_url>" "<name>"`;
    Windows: `Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=<name>"`), the device checks
-   from §2/§3/§4 (Zoom often defaults the speaker to the mic device), "turn captions on", the sign-in-window
-   decoy rule (`show_meeting_window.sh` / AppActivate — the child must end up in the meeting window, not on
-   the Zoom sign-in page), and the loop from §5:
-   `listen.py --until-silence 2 --max 90` -> decide in persona -> `speak.py --if-quiet --max-wait 30 --voice ...`.
-   Tell exactly one child to open the conversation once all names are in the roster; the others speak only when
-   addressed or when a listen cycle comes back empty. Ask for screenshots of the participant list and the
-   captions panel (own line + another Devin's line), a `(heard, said)` log, and "leave, don't end".
+   from §2/§3/§4 (Zoom often defaults the speaker to the mic device), "turn captions on" (**off in a Wispr run**, §7),
+   the sign-in-window decoy rule (`show_meeting_window.sh` / AppActivate — the child must end up in the meeting
+   window, not on the Zoom sign-in page), and the conversation: `converse.py` from §5 with a persona file, the
+   roster, a steer file and `--log` (Mac/Linux; Windows children use the manual loop until converse.py's
+   Windows capture is verified). Tell exactly one child to `--open` once all names are in the roster; the others
+   run without `--open` and speak only when addressed (the model answers PASS otherwise). Ask for screenshots of
+   the participant list and the captions panel (own line + another Devin's line), the `turns.jsonl` log, and
+   "leave, don't end".
+   Put every rule in the *first* prompt — captions on/off, split-screen, Wispr yes/no, which branch to test and
+   its known failure mode: each mid-run correction cost a child 5-15 min in the 2026-09-11 runs. Start from
+   `docs/child-prompt-mac.md` (fill the `{{...}}` fields; drop its WISPR block unless your own prompt says
+   `wispr`). Start children only after every secret they need is saved (secrets are injected at session start).
    Two things to put in the prompts, both cost turns otherwise: the opener's first listens come back empty while
    the others are still setting up (expected — re-open, don't debug), and the participant-list screenshot must be
    taken while everyone is still in the meeting, not at the end when children have already left.
@@ -330,7 +372,81 @@ A prompt like "have 2 Mac VMs and 1 Windows VM join the same Zoom and chat with 
 6. When the children report, `python3 scripts/zoom_meeting.py --end <id>` and confirm with `--list-live`.
 
 Timing seen so far: children take 1-3 min to be in the meeting (snapshot with Zoom preinstalled; ~60 s more
-if the blueprint has to run by hand), a listen/speak turn is 5-15 s, a 6-8 turn conversation is ~8 min.
+if the blueprint has to run by hand), a manual listen/speak turn is 20-40 s (agent step), a converse.py turn
+~6-9 s; a 6-8 turn conversation is ~8 min manual, ~2-3 min with converse.py. A Wispr run adds ~5 min per Mac
+for login + permissions (§7).
+
+## 7. Wispr Flow Notetaker on the Mac VMs — opt-in, verified 2026-09-11 on two macOS 26.5 VMs
+
+**Only when the parent prompt contains the word `wispr`.** Otherwise: do not launch, sign in to, or configure
+Wispr Flow (the cask may be preinstalled by the blueprint; leave it alone). Windows/Linux children are never
+affected. Wispr Notetaker is a local Mac app that records system audio + the default mic and produces a live
+transcript, a diarised refined transcript and an AI summary; no bot joins Zoom. It runs on **both** Mac VMs.
+
+Rules for a Wispr run (put them in the children's first prompt):
+- Zoom captions **off** (`More (…) > Hide captions` if on). The Wispr live transcript is the proof of speech.
+- Screen split: Zoom meeting window left half, Wispr "Meeting Recorder" (notepad/live transcript) right half —
+  `scripts/wispr_notetaker.sh layout`. The recorder child records this layout.
+- Credentials: `WISPR_FLOW_EMAIL` / `WISPR_FLOW_PASSWORD` (org secrets). Type them with `printenv X | pbcopy` + ⌘V;
+  never echo, log or screenshot them. The same email/password is a throwaway Google account (Google sign-in uses it).
+
+```bash
+scripts/wispr_notetaker.sh install    # casks wispr-flow + google-chrome, Chrome = default browser, click-to-show-desktop off
+scripts/wispr_notetaker.sh devices    # system output AND input -> BlackHole 2ch (Notetaker follows the default input)
+scripts/wispr_notetaker.sh launch     # `open -a "Wispr Flow"` does not find it; the script opens the .app path
+# sign in + permissions: GUI steps below
+scripts/wispr_notetaker.sh authdb grant     # before the Accessibility toggle ...
+scripts/wispr_notetaker.sh authdb restore   # ... and right after it is on
+scripts/wispr_notetaker.sh layout     # once Zoom is joined and a note is running
+scripts/wispr_notetaker.sh status
+```
+
+Sign-in (budget 5 min, then report and continue without Wispr):
+1. App > **Sign in via browser** opens the default browser. **Never use the email + password form: its hCaptcha
+   checkbox spins forever in Safari (both VMs, 3-20 min lost).** Chrome must be the default browser (`install` does
+   it; confirm the "Use Chrome" dialog if one is up) — if Safari opened anyway, close it and re-click the button.
+2. Click **Continue with Google**, paste email then password, **Continue** on the consent screen. No verification
+   code / Gmail step was needed on either VM.
+3. Handoff to the app needs a **second** click: Safari's `Open Wispr Flow` button a second time (then "Always
+   Allow"), or in Chrome click **Sign in via browser** in the app a second time after "You're now logged in".
+   The app then shows onboarding "Welcome, <name>". It stays signed in across quit/relaunch within the VM.
+
+Onboarding/permissions (choose the Notetaker use-case, any survey answers, Esc closes the intro video):
+- **Microphone** and **System Audio Recording**: plain TCC dialogs -> Allow (no password).
+- **Accessibility** ("Allow Wispr to recognize meetings"; mandatory in onboarding): the System Settings toggle asks
+  for the account password. Passwordless sudo does not help and allowing only `system.preferences*` does not stop
+  the prompt (authd wants `com.apple.DiskManagement.reserveKEK`). What worked: `wispr_notetaker.sh authdb grant`
+  (backs up + allows seven rights incl. reserveKEK), flip the toggle, `authdb restore` immediately. TCC.db is
+  read-only (SIP) — do not try to write it. If the toggle still prompts, screenshot it and report; do not guess a password.
+- The `devin-remote` mic TCC prompt appears again on the first `say`/TTS: Allow (approve_mic_prompts.sh may get it).
+
+Notetaker:
+- Start: menu bar **Notetaker > Start new note** (works with the virtual mouse). Wispr also pops "Transcribe this
+  meeting with Wispr?" ~5 s after Zoom joins (needs Accessibility). **Toast buttons mostly do not take virtual-mouse
+  clicks** — a missed click hits the wallpaper and macOS hides every window (`install` disables that). Prefer the
+  menu bar; if a toast click does register you get a second parallel note, which is harmless.
+- Test before joining Zoom: `say -a "BlackHole 2ch" "Wispr test one two three"` shows in the live transcript in ~5 s.
+- Stop: green **Stop** at the bottom of the Meeting Recorder window — first click focuses Wispr/opens the confirm,
+  second click stops. "Started by mistake?" -> **Keep**. Summary tab ~20 s, refined diarised transcript ~1 min.
+  Copy icons in each tab header -> `pbpaste > ~/wispr_transcript.txt` / `~/wispr_summary.txt`; attach both.
+- Notes live in `~/Library/Application Support/Wispr Flow/` (`flow.sqlite`, `meetings/<uuid>/`); never copy
+  `session.json`/Cookies anywhere (Wispr rotates them; the user asked not to persist logins).
+
+Speaker attribution — what to expect and claim:
+- Live labels are **You** = default-input mic, **Them** = system audio. Our TTS is app audio played into BlackHole 2ch,
+  which Wispr's system-audio tap also hears, so **own lines show as "Them"** (fragments as "You"). Setting the default
+  output to BlackHole 16ch and playing TTS with `say -a "BlackHole 2ch"` does **not** change this (tested on both
+  VMs) — the tap is not limited to the default output device. Don't repeat that experiment.
+- The refined (post-meeting) transcript diarises by voice into Speaker 1/Speaker 2 correctly when the two VMs use
+  different ElevenLabs voices (Roger/Sarah); same-voice `say` lines get merged. It maps one speaker to the account
+  name, not to Zoom roster names. That refined transcript is the speaker-identification evidence; live You/Them is not.
+- Wispr Settings > General > Microphone shows "Auto-detect (<default input>)"; Notetaker always uses auto-detect,
+  so `devices` (input = BlackHole 2ch) is what matters. Settings > Notetaker: shortcut Opt+M (not exercised via the
+  virtual keyboard), "Stop Notetaker when a call ends" on.
+
+Order of operations for a Wispr child: `install` -> `devices` -> `launch` + sign-in + permissions -> test note ->
+join Zoom (§2; mic BlackHole 2ch, speaker BlackHole 16ch, captions off) -> start note -> `layout` -> recorder starts
+recording -> `converse.py` (§5) -> stop note, export -> leave (don't end) -> attach transcript, summary, recording.
 
 ## Limits
 - Paid host account: no 40-min cap. Free account: 40-min cap on 3+ participant meetings even with no host present.

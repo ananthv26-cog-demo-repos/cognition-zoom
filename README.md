@@ -14,9 +14,11 @@ Windows VMs) join it as named guests through the Zoom desktop app (web client as
 | `scripts/windows/vb-audio-driver-signer.cer` | VB-Audio's public code-signing certificate (exported from the Hi-Fi Cable driver `.cat`). `certutil -addstore TrustedPublisher` it so the Hi-Fi Cable driver installs without the "Windows Security" publisher dialog (the blueprint removes the trust again after the install). Windows has no `join_zoom.sh`: the `zoommtg://` deep link is the whole join (skill section 4). |
 | `scripts/speak.py` | `speak.py "text"`: ElevenLabs TTS (natural voice, `--voice Roger`, `--list-voices`) played into the Zoom mic (`paplay --device=devin_mic` on Linux, `afplay` with system output = BlackHole 2ch on macOS, `System.Media.SoundPlayer` with system output = CABLE Input on Windows). Falls back to `say -a "BlackHole 2ch"` / `espeak-ng` / `System.Speech` without `ELEVENLABS_API_KEY`. `--if-quiet` waits for a gap in the meeting audio (random 0.5-2 s, backs off if someone else starts). |
 | `scripts/listen.py` | `listen.py --seconds 15`: records what the meeting says (`zoom_out.monitor` on Linux, `BlackHole 16ch` via ffmpeg on macOS, `Hi-Fi Cable Output` via ffmpeg dshow on Windows) and transcribes it with ElevenLabs Scribe, `keyterms` biased to "Devin" so names come back right. `--json` gives words + `speaker_id`. `--until-silence 2` blocks until the current speaker has paused for 2 s (turn-taking). |
+| `scripts/converse.py` | The conversation loop in one process: listen (`--silence` 1.2 s) -> Scribe -> chat model on Fireworks (`FIREWORKS_API_KEY`, `ZOOM_LLM_MODEL`, default GLM 5.3 fast, ~1 s) -> ElevenLabs -> speak in the next gap, ~6-9 s per turn instead of a 20-40 s agent step. Every line is generated live from `--persona`, `--roster`, the running transcript and a `--steer` file Devin edits between turns (a line `STOP` hands control back to `listen.py`/`speak.py`); the model may answer `PASS` (stay quiet) or end with `DONE`. `--log turns.jsonl` records heard/said/pass with timestamps; `--check` is a 2 s preflight of keys, voice and model. |
+| `scripts/wispr_notetaker.sh` | macOS, **opt-in (only when the prompt says "wispr")**: `install` (Wispr Flow + Chrome casks, Chrome as default browser, click-to-show-desktop off), `devices` (system in/out -> BlackHole 2ch), `launch`, `authdb grant|restore` (the Accessibility toggle's password prompt), `layout` (Zoom left, Wispr Meeting Recorder right), `status`. Sign-in and permissions stay interactive; nothing runs unless invoked. Skill section 7. |
 | `scripts/dismiss_notifications.sh` | macOS: closes every Notification Center banner (Zoom background-activity, Chrome notification prompts) via Accessibility so they do not cover the Zoom window. Run by `join_zoom.sh`; rerun whenever a banner shows up. |
 | `.agents/skills/zoom-meeting/SKILL.md` | Step-by-step skill Devin sessions in this repo auto-load: create, hand off, join, set audio devices. |
-| `docs/wispr-zoom-demo-feasibility.md` | Audio architecture for the Mac VMs (BlackHole, Wispr Flow, realtime voice). |
+| `docs/wispr-zoom-demo-feasibility.md` | Audio architecture for the Mac VMs (BlackHole, Wispr Flow, realtime voice) and the verified 2026-09-11 Wispr Notetaker run (what worked, what the live You/Them labels mean, what was baked in). |
 | `docs/gotchas.md` | Every symptom -> cause -> fix we hit (API scopes, bot check, arm64 pkg, monitor-source remap, echo loop, notifications...). Read before debugging. |
 
 ## Secrets
@@ -32,6 +34,11 @@ on a paid personal Zoom account with `meeting:write:meeting:admin` and
 Voices read, Models) powers `speak.py` / `listen.py`. Without it `speak.py` falls back to the OS voice;
 `listen.py` exits up front (no offline STT).
 
+`FIREWORKS_API_KEY` (org) is the chat model behind `converse.py`; there is no other LLM backend.
+`WISPR_FLOW_EMAIL` / `WISPR_FLOW_PASSWORD` (org) are only touched in a "wispr" run (Google sign-in on the
+Mac VMs, typed via the clipboard, never logged). Secrets are injected when a session starts: start children
+after the secrets exist.
+
 ## Quick start
 
 ```bash
@@ -44,7 +51,7 @@ scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>"
 scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>" "Linux VM 1"
 PULSE_SINK=devin_mic espeak-ng "Hello from Linux one"     # or: paplay --device=devin_mic tts.wav
 # child (Windows, PowerShell): desktop app, name pre-filled, mic=CABLE Output speaker=Hi-Fi Cable Input; then computer use: Join
-#   Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<encrypted_password>&uname=Win"
+#   Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<encrypted_password>&uname=Windows%20VM"
 # naming scheme for the roster: children are "Mac VM 1"/"Mac VM 2"/"Windows VM" by OS and the parent's seat
 #   is "Parent" — deliberately no "Devin" in display names since Zoom captions mishear it
 # only seeing a "Zoom Workplace" sign-in window? that's the decoy home window — the join
@@ -54,8 +61,13 @@ PULSE_SINK=devin_mic espeak-ng "Hello from Linux one"     # or: paplay --device=
 # any participant: natural voice in, transcript out (needs ELEVENLABS_API_KEY; Windows: python scripts\speak.py ...)
 scripts/speak.py --voice Roger "Hi everyone, Mac VM 2 here."
 scripts/listen.py --seconds 15
-# conversation loop per Devin: hear a turn, decide, answer in the next gap
+# conversation: one process per Devin, lines generated live from a persona + the transcript, steered via ~/steer.txt
+python3 scripts/converse.py --name "Mac VM 1" --voice Roger --check
+python3 scripts/converse.py --name "Mac VM 1" --voice Roger --persona ~/persona.md --roster "Mac VM 2 (frontend)" \
+    --steer ~/steer.txt --log ~/turns.jsonl --open "Hi Mac VM 2, quick standup?"     # only the opener passes --open
+# manual loop (fallback / take-over after `echo STOP >> ~/steer.txt`): hear a turn, decide, answer in the next gap
 heard=$(scripts/listen.py --until-silence 2 --max 90) && scripts/speak.py --if-quiet --voice Roger "<reply to $heard>"
+# macOS, only when the prompt says "wispr": scripts/wispr_notetaker.sh install|devices|launch|layout (skill section 7)
 # parent, when done
 python3 scripts/zoom_meeting.py --end <id>
 ```
@@ -157,3 +169,18 @@ python3 scripts/zoom_meeting.py --end <id>
   | RMS on Hi-Fi Cable | Zoom speech 1079-3060 per second (~2200), silence 1; default `ZOOM_SPEECH_RMS=300` holds |
   | `speak.py --if-quiet --max-wait 40` while Linux talked | "someone is talking; waiting for them to finish", spoke 14 s after the Linux onset; captions show Linux's line then "Devin Wynn here I waited for a gap before speaking." |
   | Fix found | `Popen.kill()` only killed the choco shim -> `taskkill /T /F` on Windows, reader thread joined before the pipe closes (all platforms) |
+- 2026-09-11, **Wispr Flow Notetaker on 2 macOS VMs** (`Mac VM 1` / `Mac VM 2` in one meeting, Zoom captions off,
+  Zoom left / Wispr Meeting Recorder right, 8 spoken turns; details in `docs/wispr-zoom-demo-feasibility.md`):
+
+  | Check | Result |
+  |-------|--------|
+  | `brew install --cask wispr-flow` | ok, `/Applications/Wispr Flow.app` (~45 s); `open -a "Wispr Flow"` does not find it, open the path |
+  | Sign in: email + password form | **hCaptcha checkbox spins forever in Safari** on both VMs; abandoned |
+  | Sign in: Chrome default browser + Continue with Google | ok, no CAPTCHA, no verification code; app needed a second "Sign in via browser" / "Open Wispr Flow" click |
+  | Microphone / System Audio Recording | plain TCC Allow dialogs |
+  | Accessibility toggle | asks for the account password; `authorizationdb write system.preferences allow` not enough (`com.apple.DiskManagement.reserveKEK`); seven rights allowed + restored -> toggle flips |
+  | Toast "Transcribe this meeting with Wispr?" | virtual-mouse clicks mostly fall through and hide all windows (click-to-show-desktop); menu bar `Notetaker > Start new note` works |
+  | Live transcript | every line from both VMs within ~5 s, incl. lines `listen.py` missed; own TTS labelled "Them" (also with default output on 16ch + `say -a "BlackHole 2ch"`) |
+  | Refined transcript / summary | ~1 min / ~20 s after Stop; Speaker 1 / Speaker 2 split Roger vs Sarah correctly, `say` test lines merged |
+  | `set {position, size} of window` | -10003; separate `set position` + `set size` works (`wispr_notetaker.sh layout`) |
+  | `converse.py --check` (Linux parent) | voice resolved 0.3 s, `glm-5p3-fast` in-persona `SAY:` line in 1.3 s; live child run of the loop still pending (children started before `FIREWORKS_API_KEY` existed) |

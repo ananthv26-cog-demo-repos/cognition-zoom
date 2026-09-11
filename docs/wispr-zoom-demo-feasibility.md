@@ -1,5 +1,39 @@
 # Wispr Flow x Devin: 3 Mac VMs on one Zoom call
 
+## Verified 2026-09-11 (two macOS 26.5 arm64 Devin VMs, one Zoom meeting)
+
+What ran: both Mac VMs installed Wispr Flow, signed in, granted Microphone + System Audio + Accessibility, joined
+the same host-less Zoom as `Mac VM 1` / `Mac VM 2`, and held an 8-turn spoken standup (ElevenLabs Roger/Sarah
+voices into BlackHole 2ch) while **Wispr Notetaker ran on each VM** as a local notetaker of the meeting audio.
+The operational recipe lives in `.agents/skills/zoom-meeting/SKILL.md` section 7 and `scripts/wispr_notetaker.sh`.
+
+Results:
+- Notetaker's live transcript caught every line on both VMs, including lines `listen.py` missed or truncated.
+- The AI summary and the refined post-meeting transcript were generated; the refined pass diarised the two
+  ElevenLabs voices into Speaker 1 / Speaker 2 correctly (same-voice `say` test lines were merged into one speaker).
+  It mapped one speaker to the Wispr account name; it does not know Zoom roster names.
+- **Live You/Them labels are not usable as speaker identification in this topology.** "You" = default input
+  (BlackHole 2ch), "Them" = system audio. Our TTS is app audio played into BlackHole 2ch, and Wispr's system-audio
+  tap hears it regardless of the default output device: with the default output on BlackHole 16ch and TTS played
+  with `say -a "BlackHole 2ch"`, own lines were still labelled "Them" on both VMs. The tap is per-process/all app
+  audio, not "the default output device". The diarised refined transcript is the evidence to use.
+- Notetaker needs no API and no bot; it never appears in the Zoom roster. Wispr's separate Flow platform API
+  (STT websocket) is invite-only and was not used.
+
+Cost of the first run and the fixes now baked in:
+- Sign-in: the email + password form's hCaptcha never loads in Safari (3-20 min lost per VM). Fix: Chrome as
+  default browser + "Continue with Google", and a second "Sign in via browser" / "Open Wispr Flow" click for the
+  browser -> app handoff. (`wispr_notetaker.sh install`, skill section 7.)
+- Accessibility toggle asks for the account password; allowing `system.preferences*` in authorizationdb is not
+  enough (authd needs `com.apple.DiskManagement.reserveKEK`). Fix: `wispr_notetaker.sh authdb grant|restore`
+  (seven rights, backed up and restored).
+- Toast buttons ignore virtual-mouse clicks and a missed click hides all windows. Fix: menu bar
+  `Notetaker > Start new note`; `EnableStandardClickToShowDesktop false` in the blueprint.
+- Split screen: separate `set position` / `set size` (`wispr_notetaker.sh layout`); the combined form errors -10003.
+- Per-turn latency (20-40 s agent step) -> `scripts/converse.py` (in-process loop, Fireworks model, ~1 s decision).
+
+The sections below are the original pre-spike analysis; where they disagree with the above, the above wins.
+
 ## Verdict
 
 Both ideas are feasible on Devin macOS VMs without any hypervisor changes. BlackHole is the key piece and it works in a VM that has no audio hardware because it is a user-space CoreAudio HAL plugin, not a kernel extension and not a hardware device. The recommended path is a 1-session spike on a single Mac VM, then scale to three.
@@ -25,9 +59,9 @@ Install two BlackHole devices so send and receive never share a device (prevents
 - BlackHole 16ch = "ears": Zoom speaker output; Wispr Flow and/or ffmpeg capture from here
 
 ```
-TTS (ElevenLabs / OpenAI / macOS say) --afplay--> BlackHole 2ch --> Zoom mic
-Zoom speaker --> BlackHole 16ch --> Wispr Flow (input device) --> typed transcript --> Devin reads it
-                                 \-> ffmpeg avfoundation capture --> STT or Realtime API
+TTS (ElevenLabs / macOS say) --afplay--> BlackHole 2ch --> Zoom mic   (Wispr Notetaker hears this as system audio = "Them")
+Zoom speaker --> BlackHole 16ch --> ffmpeg avfoundation capture --> Scribe STT (listen.py / converse.py)
+                                 \-> Wispr Notetaker system-audio tap ("Them"); default input BlackHole 2ch = "You"
 ```
 
 Zoom: either the desktop client (`Zoom.pkg` from zoom.us, join as guest via meeting link + passcode, display name "Devin 1/2/3") or the web client in Chrome. Desktop client gives clean device selection; web client avoids an install. Both should work.

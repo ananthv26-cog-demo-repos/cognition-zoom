@@ -108,6 +108,35 @@ script that implements it is named so nobody has to rediscover it.
   Never sign in — guest joins need no account.
 - [mac] **Safari web client shows no mic level on `say`** and offers only "Same as System" for the speaker.
   Treat Safari as join-only; use the desktop app.
+- [mac] **`show_meeting_window.sh --snapshot` dies with status 139 ("could not enumerate Zoom windows") and
+  `join_zoom.sh` refuses to join (`zoom state: enum-failed`).** `ObjC.deepUnwrap($.CFBridgingRelease(list))`
+  segfaults osascript's JXA on macOS 26; `ObjC.castRefToObject(list)` is the form that works.
+- [mac] **`listen.py` hears nothing while the other VM is clearly talking.** Zoom's speaker is on BlackHole 2ch
+  (the mic) instead of 16ch, so nothing reaches the capture device. Audio ^ > speaker = BlackHole 16ch.
+
+## Wispr Flow Notetaker (macOS, opt-in: only when the prompt says "wispr")
+
+- [mac] **Wispr web sign-in: the hCaptcha checkbox spins forever in Safari** (both VMs; the email + password form).
+  Do not retry it. Chrome as default browser + **Continue with Google** signs in without any CAPTCHA or
+  verification code. `scripts/wispr_notetaker.sh install` installs Chrome and makes it the default.
+- [mac] **Browser says "You're now logged in" but the app stays on its login screen.** Click **Sign in via browser**
+  in the app a second time (Chrome), or Safari's **Open Wispr Flow** a second time -> "Always Allow".
+- [mac] **Accessibility toggle for Wispr Flow asks for the account password.** Passwordless sudo does not bypass
+  it and `authorizationdb write system.preferences allow` is not enough (authd logs `com.apple.DiskManagement.
+  reserveKEK`). `scripts/wispr_notetaker.sh authdb grant` allows seven rights (backed up), flip the toggle,
+  `authdb restore`. Writing TCC.db directly fails (SIP, read-only).
+- [mac] **Clicking Wispr's toast buttons ("Yes, transcribe", "Keep") makes every window vanish.** The click falls
+  through to the wallpaper and macOS 26 "click to show desktop" hides all windows.
+  `defaults write com.apple.WindowManager EnableStandardClickToShowDesktop -bool false` (in the blueprint and
+  `install`); start notes from the menu bar **Notetaker > Start new note** instead of the toast.
+- [mac] **`set {position, size} of window ... ` in osascript fails with -10003 "Access not allowed".** Use two
+  statements, `set position to {...}` then `set size to {...}` (`scripts/wispr_notetaker.sh layout`). Window
+  names: Zoom `Zoom Meeting`, Wispr `Meeting Recorder` (notepad), `Status` (flow bar).
+- [mac] **`open -a "Wispr Flow"` says the application cannot be found.** `open "/Applications/Wispr Flow.app"`.
+- [mac] **Own TTS lines show up as "Them" in the live transcript.** Wispr's system-audio tap hears every app's
+  audio, including TTS played into BlackHole 2ch, whatever the default output device is (tested: default output on
+  16ch + `say -a "BlackHole 2ch"` still "Them"). Not fixable from our side; the refined post-meeting transcript
+  diarises Speaker 1/Speaker 2 by voice correctly, use that as the speaker evidence.
 
 ## Linux audio (PulseAudio)
 
@@ -202,3 +231,8 @@ script that implements it is named so nobody has to rediscover it.
   each have their own YAML document (`runs-on: macos` vs default); Windows is `runs-on: windows` +
   `shell: powershell`, one `initialize` list item per native installer so a failure is attributed to its step.
 - [all] **`python3 -m py_compile` leaves `scripts/__pycache__/`.** Ignored via `.gitignore`.
+- [all] **A child says `FIREWORKS_API_KEY` (or any secret) is empty although it is saved.** Secrets are injected
+  when a session starts; a child started before the secret was saved never gets it. Save secrets first, then
+  start children; `converse.py --check` catches it in 2 s.
+- [all] **Each mid-run correction to a child costs 5-15 min** (captions on/off, split screen, which branch, known
+  failure modes). Everything the child needs goes into its first prompt; see skill section 6 and 7.

@@ -207,9 +207,24 @@ class Conversation:
         self.record("info", "time or turn budget reached; exiting")
 
 
+def check(a: argparse.Namespace) -> None:
+    """Preflight without touching the meeting: keys present, voice resolves, the model answers in SAY: form."""
+    t0 = time.monotonic()
+    voice = speak.resolve_voice(a.voice)
+    print(f"elevenlabs: voice {a.voice} -> {voice} ({time.monotonic() - t0:.1f}s)")
+    t0 = time.monotonic()
+    reply = llm([{"role": "system", "content": RULES.format(name=a.name, roster=a.roster or "Mac VM 2")},
+                 {"role": "user", "content": "Transcript so far:\nThem: Hi, how is the build looking today?\n\n"
+                                             "What do you say next? End with your SAY: line (or SAY: PASS)."}])
+    print(f"fireworks: {MODEL} -> {reply!r} ({time.monotonic() - t0:.1f}s)")
+    if reply == "PASS":
+        sys.exit("model answered PASS to a direct question; check ZOOM_LLM_MODEL (see the list in this file)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", required=True, help='roster name, e.g. "Mac VM 1"')
+    ap.add_argument("--check", action="store_true", help="preflight: keys, voice and one model call; do not join the loop")
     ap.add_argument("--voice", default=os.environ.get("ELEVENLABS_VOICE", speak.DEFAULT_VOICE))
     ap.add_argument("--model", default=os.environ.get("ELEVENLABS_MODEL", speak.DEFAULT_MODEL), help="ElevenLabs model")
     ap.add_argument("--persona", help="file: who you are, what you worked on, what you want from this meeting")
@@ -233,6 +248,9 @@ def main() -> None:
         sys.exit("ELEVENLABS_API_KEY not set (listen.py has no offline STT)")
     if not os.environ.get("FIREWORKS_API_KEY"):
         sys.exit("FIREWORKS_API_KEY not set (the reply for each turn comes from a chat model)")
+    if a.check:
+        check(a)
+        return
     Conversation(a).run()
 
 
