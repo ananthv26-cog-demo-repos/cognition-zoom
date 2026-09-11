@@ -62,15 +62,19 @@ initialize:
     run: |
       # The chocolatey vb-cable package (pack 43) installs but enumerates nothing on Server 2022; pack 45 works.
       # The installers' exit codes are not documented, so the step asserts on a healthy (Status OK) PnP device instead.
+      # An installed-but-faulted cable is never re-run through the installer (the -i switch toggles); it fails loudly.
       $ErrorActionPreference = 'Stop'
-      $ok = { Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Virtual Cable' -Status OK -ErrorAction SilentlyContinue }
-      if (-not (& $ok)) {
+      $dev = { @(Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Virtual Cable' -ErrorAction SilentlyContinue) }
+      $bad = @(& $dev | Where-Object Status -ne 'OK')
+      if ($bad) { throw "VB-CABLE present but Status=$($bad.Status -join ','): remove it (pnputil /remove-device $($bad.InstanceId -join ' ')) and re-run" }
+      if (-not (& $dev)) {
         curl.exe -sfL -o $HOME\VBCABLE_Driver_Pack45.zip https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
         Expand-Archive -Force $HOME\VBCABLE_Driver_Pack45.zip $HOME\vbcable45
         Start-Process -Wait -FilePath $HOME\vbcable45\VBCABLE_Setup_x64.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\vbcable45
         Remove-Item -Recurse -Force $HOME\VBCABLE_Driver_Pack45.zip, $HOME\vbcable45
       }
-      if (-not (& $ok)) { throw 'VB-CABLE did not install' }
+      if (-not (& $dev)) { throw 'VB-CABLE did not install' }
+      if (@(& $dev | Where-Object Status -ne 'OK')) { throw 'VB-CABLE installed but is not Status OK' }
   - name: Hi-Fi Cable = Zoom speaker (second, independent cable so meeting audio cannot loop into the mic)
     run: |
       # 2015 driver signed by VB-Audio only: trusting the publisher for the duration of the install is what makes
@@ -78,8 +82,10 @@ initialize:
       # (the installed driver keeps working without it).
       # Not idempotent: running -i on an installed Hi-Fi Cable removes it, hence the guard.
       $ErrorActionPreference = 'Stop'
-      $ok = { Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -Status OK -ErrorAction SilentlyContinue }
-      if (-not (& $ok)) {
+      $dev = { @(Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -ErrorAction SilentlyContinue) }
+      $bad = @(& $dev | Where-Object Status -ne 'OK')
+      if ($bad) { throw "Hi-Fi Cable present but Status=$($bad.Status -join ','): do NOT re-run -i (it uninstalls); remove it (pnputil /remove-device $($bad.InstanceId -join ' ')) and re-run" }
+      if (-not (& $dev)) {
         $cer = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList (Resolve-Path scripts\windows\vb-audio-driver-signer.cer).Path
         $trust = "Cert:\LocalMachine\TrustedPublisher\$($cer.Thumbprint)"
         $addedTrust = -not (Test-Path $trust)
@@ -93,7 +99,8 @@ initialize:
           Remove-Item -Recurse -Force $HOME\HiFiCable.zip, $HOME\hificable -ErrorAction SilentlyContinue
         }
       }
-      if (-not (& $ok)) { throw 'Hi-Fi Cable did not install' }
+      if (-not (& $dev)) { throw 'Hi-Fi Cable did not install' }
+      if (@(& $dev | Where-Object Status -ne 'OK')) { throw 'Hi-Fi Cable installed but is not Status OK' }
   - name: defaults (system output -> CABLE Input so TTS lands in the Zoom mic) + desktop-app microphone access
     run: |
       # The 16-channel endpoint is 'CABLE In 16ch', so 'CABLE Input*' matches exactly one playback device.

@@ -162,13 +162,17 @@ Install-Module AudioDeviceCmdlets -Force -Scope CurrentUser                     
 curl.exe -sL -o $HOME\VBCABLE_Driver_Pack45.zip https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
 Expand-Archive -Force $HOME\VBCABLE_Driver_Pack45.zip $HOME\vbcable45
 Start-Process -Wait $HOME\vbcable45\VBCABLE_Setup_x64.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\vbcable45   # 1-9 s
-certutil -addstore -f TrustedPublisher scripts\windows\vb-audio-driver-signer.cer             # else a driver-trust dialog; blueprint removes it after the install
-curl.exe -sL -o $HOME\HiFiCable.zip https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip
-Expand-Archive -Force $HOME\HiFiCable.zip $HOME\hificable
-if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -Status OK -ErrorAction SilentlyContinue)) {  # -i on an installed one REMOVES it
-  Start-Process -Wait $HOME\hificable\HiFiCableAsioBridgeSetup.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\hificable  # 1.5 s
+if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -ErrorAction SilentlyContinue)) {  # any node, OK or not: -i on an installed one REMOVES it
+  $trust = "Cert:\LocalMachine\TrustedPublisher\$((Get-PfxCertificate scripts\windows\vb-audio-driver-signer.cer).Thumbprint)"
+  $addedTrust = -not (Test-Path $trust)
+  try {
+    if ($addedTrust) { certutil -addstore -f TrustedPublisher scripts\windows\vb-audio-driver-signer.cer }   # else a driver-trust dialog
+    curl.exe -sL -o $HOME\HiFiCable.zip https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip
+    Expand-Archive -Force $HOME\HiFiCable.zip $HOME\hificable
+    Start-Process -Wait $HOME\hificable\HiFiCableAsioBridgeSetup.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\hificable  # 1.5 s
+  } finally { if ($addedTrust -and (Test-Path $trust)) { Remove-Item $trust } }   # trust only needed for the install; keep it if it was already there
 }
-Remove-Item "Cert:\LocalMachine\TrustedPublisher\$((Get-PfxCertificate scripts\windows\vb-audio-driver-signer.cer).Thumbprint)"  # trust only needed for the install
+Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio*' | Format-Table Status, FriendlyName   # both must be OK; a faulted one: pnputil /remove-device <InstanceId>, then re-run
 curl.exe -sL -o $HOME\Zoom-x64.msi "https://zoom.us/client/latest/ZoomInstallerFull.msi?archType=x64"   # 212 MB; unsuffixed = 32-bit
 Start-Process -Wait msiexec -ArgumentList '/i',"$HOME\Zoom-x64.msi",'/qn','/norestart'          # 20 s -> C:\Program Files\Zoom\bin\Zoom.exe
 
