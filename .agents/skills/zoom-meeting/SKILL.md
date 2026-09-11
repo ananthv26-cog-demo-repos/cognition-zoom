@@ -7,7 +7,8 @@ description: Create a host-less Zoom meeting via the Zoom REST API (Server-to-Se
 
 ## Secrets (personal scope, already saved for Ananth)
 `ZOOM_S2S_ACCOUNT_ID`, `ZOOM_S2S_CLIENT_ID`, `ZOOM_S2S_CLIENT_SECRET`, `ZOOM_HOST_EMAIL`
-(S2S OAuth app "devin-demo" on a paid personal Zoom account; scopes `meeting:write:meeting:admin`, `meeting:read:meeting:admin`).
+(S2S OAuth app "devin-demo" on a paid personal Zoom account; scopes `meeting:write:meeting:admin`, `meeting:read:meeting:admin`;
+`--end` / `--delete` / `--list-live` additionally need `meeting:update:status:admin` / `meeting:delete:meeting:admin` / `meeting:read:list_meetings:admin`).
 
 ## 1. Create the meeting (parent session)
 
@@ -15,8 +16,14 @@ description: Create a host-less Zoom meeting via the Zoom REST API (Server-to-Se
 python3 scripts/zoom_meeting.py --topic "Devin standup" --duration 60 --json
 # -> {"id": ..., "passcode": ..., "join_url": "https://us05web.zoom.us/j/<id>?pwd=<enc>",
 #     "web_client_url": "https://app.zoom.us/wc/join/<id>?pwd=<enc>", ...}
-python3 scripts/zoom_meeting.py --delete <id>   # cleanup afterwards
+python3 scripts/zoom_meeting.py --end <id>      # when the demo is over (see below)
+python3 scripts/zoom_meeting.py --list-live     # find stragglers
 ```
+
+Always `--end` the meeting when done: a join-before-host meeting stays "in progress" while any
+guest is connected, and the host account then rejects joins to any other meeting
+("The host has another meeting in progress"). A blocked join = a Devin is still sitting in an
+old meeting; end it or have that session leave.
 
 Facts verified 2026-09-11:
 - S2S tokens must target an explicit host: `POST /users/{ZOOM_HOST_EMAIL}/meetings` (`me` is not valid for S2S).
