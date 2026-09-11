@@ -58,9 +58,10 @@ fi
 
 LOCKDIR="${TMPDIR:-/tmp}/approve_mic_prompts.lock"
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
-  # a crashed/killed watcher leaves the dir behind — reclaim it if dead
+  # a crashed/killed watcher leaves the dir behind — reclaim it if the recorded
+  # PID is dead (or was reused by an unrelated process)
   oldpid="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
-  if [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null; then exit 0; fi
+  if [ -n "$oldpid" ] && ps -p "$oldpid" -o command= 2>/dev/null | grep -q "approve_mic_prompts.sh"; then exit 0; fi
   rm -f "$LOCKDIR/pid"; rmdir "$LOCKDIR" 2>/dev/null
   mkdir "$LOCKDIR" || exit 0
 fi

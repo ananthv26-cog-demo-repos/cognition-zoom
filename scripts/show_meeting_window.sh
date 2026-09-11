@@ -22,7 +22,8 @@ deep_link() {
   pwd_="$(sed -nE 's#.*[?&]pwd=([^&]+).*#\1#p' <<<"$URL")"
   [[ "$MEETING_ID" =~ ^[0-9]+$ ]] || { echo "cannot parse meeting id from $URL" >&2; exit 1; }
   if [ -n "$NAME" ]; then
-    enc_name="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1], safe=""))' "$NAME" 2>/dev/null || echo "$NAME")"
+    enc_name="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1], safe=""))' "$NAME" 2>/dev/null \
+      || sed 's/[^A-Za-z0-9._~-]/_/g' <<<"$NAME")"
   fi
   echo "zoommtg://zoom.us/join?confno=${MEETING_ID}${pwd_:+&pwd=$pwd_}${enc_name:+&uname=$enc_name}"
 }
@@ -38,7 +39,8 @@ on run argv
       if wantTitle is not "" then
         repeat with w in windows
           try
-            if (name of w) contains wantTitle then
+            -- never accept the home/sign-in window even if the topic matches it
+            if (name of w) contains wantTitle and (name of w) does not contain "Zoom Workplace" then
               perform action "AXRaise" of w
               set frontmost to true
               return "raised " & (name of w)
@@ -71,7 +73,7 @@ EOF
   Linux)
     export DISPLAY="${DISPLAY:-:0}"
     FOUND=""
-    if [ -n "$WANT" ] && wmctrl -l | grep -F "$WANT" >/dev/null; then
+    if [ -n "$WANT" ] && wmctrl -l | grep -F "$WANT" | grep -vF "Zoom Workplace" >/dev/null; then
       wmctrl -a "$WANT"; FOUND="$WANT"
     else
       while IFS= read -r line; do
