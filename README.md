@@ -2,14 +2,15 @@
 
 Tooling for the "N Devins on one Zoom call" demo: a parent Devin session creates a
 host-less Zoom meeting through the Zoom REST API, then child sessions (Mac or Linux
-VMs) join it as named guests — the Zoom desktop app on macOS, Zoom's web client on Linux.
+VMs) join it as named guests through the Zoom desktop app (web client as fallback).
 
 ## Layout
 
 | Path | Purpose |
 |------|---------|
 | `scripts/zoom_meeting.py` | Server-to-Server OAuth token + `POST /users/{host}/meetings`; prints `join_url`, a web-client URL and a `zoommtg://` deep link. `--end ID` ends it when the demo is over; `--list-live`, `--delete ID` (each needs its scope, see Secrets). |
-| `scripts/join_zoom.sh` | `join_zoom.sh <url> [display name]`. macOS: Zoom desktop app via `zoommtg://` (default when the app matches `uname -m`), or `ZOOM_JOIN_MODE=safari|chrome` for the web client. Linux: plain Chrome (own profile, no automation flags) so the join is not blocked as a bot. |
+| `scripts/join_zoom.sh` | `join_zoom.sh <url> [display name]`. Zoom desktop app via `zoommtg://` when installed (macOS: app matches `uname -m`; Linux: `/usr/bin/zoom`), else a plain Chrome (own profile, no automation flags, so the join is not blocked as a bot). `ZOOM_JOIN_MODE=desktop|chrome|safari` overrides. |
+| `scripts/linux_audio.sh` | Linux BlackHole equivalent: PulseAudio null sinks `DevinMic` (play TTS here) + `ZoomOut` (Zoom speaker) and remap source `DevinMicSrc` (Zoom mic). Idempotent; `join_zoom.sh` runs it before the desktop app. |
 | `scripts/dismiss_notifications.sh` | macOS: closes every Notification Center banner (Zoom background-activity, Chrome notification prompts) via Accessibility so they do not cover the Zoom window. Run by `join_zoom.sh`; rerun whenever a banner shows up. |
 | `.agents/skills/zoom-meeting/SKILL.md` | Step-by-step skill Devin sessions in this repo auto-load: create, hand off, join, set audio devices. |
 | `docs/wispr-zoom-demo-feasibility.md` | Audio architecture for the Mac VMs (BlackHole, Wispr Flow, realtime voice). |
@@ -31,8 +32,11 @@ python3 scripts/zoom_meeting.py --topic "Devin standup" --duration 60 --json
 # child (macOS): desktop app, name pre-filled; then computer use: Join
 SwitchAudioSource -s "BlackHole 2ch"
 scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>" "Devin 1"
-# child (Linux): plain Chrome; then computer use: type display name -> Join
-scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>"
+# child (Linux): desktop app, name pre-filled, mic=DevinMicSrc speaker=ZoomOut; then computer use: Join
+scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>" "Devin 2"
+PULSE_SINK=devin_mic espeak-ng "Hello from Devin two"     # or: paplay --device=devin_mic tts.wav
+# parent, when done
+python3 scripts/zoom_meeting.py --end <id>
 ```
 
 ## Verified
@@ -60,3 +64,18 @@ scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>"
 
   Also observed: "The host has another meeting in progress" while a previous meeting on the
   host account was still live (one concurrent meeting per host); it cleared by itself.
+- 2026-09-11, Linux Devin VM (Ubuntu 22.04.5, x86_64, no audio hardware), Zoom desktop app:
+
+  | Command | Result | Time |
+  |---------|--------|------|
+  | `curl -sL -o zoom_amd64.deb https://zoom.us/client/latest/zoom_amd64.deb` (297 MB) + `sudo apt-get install -y ./zoom_amd64.deb` | ok, Zoom Workplace 7.1.5.4332 at `/usr/bin/zoom` | ~10 s + 29 s |
+  | `sudo apt-get install -y pulseaudio pulseaudio-utils espeak-ng` | ok (`pactl` was absent before) | ~20 s |
+  | `scripts/linux_audio.sh` | sinks `devin_mic`, `zoom_out`; sources `devin_mic.monitor`, `devin_mic_src`; idempotent, also after `pulseaudio --kill` | <1 s |
+  | `scripts/join_zoom.sh <join_url> "Devin 2"` | desktop preview with name pre-filled, joins as guest; **Audio ^** lists mic `DevinMicSrc`, speakers `DevinMic`/`ZoomOut`; the choice is remembered ("Custom audio combination") | ~10 s to preview |
+  | `PULSE_SINK=devin_mic espeak-ng "Hello from Devin on Linux..."` and `paplay --device=devin_mic tts.wav` | **More > Show captions transcribes both** (robotic espeak voice -> "Bevin", "roundbox"; fine for proof, use a real TTS for the demo) | — |
+  | `python3 scripts/zoom_meeting.py --list-live` / `--end <id>` | ok once the three management scopes were added to the S2S app | 1 s |
+
+  Gotcha: Zoom's Linux client does not list PulseAudio `*.monitor` sources as microphones
+  ("Zoom cannot detect your microphone"); the `module-remap-source` over `devin_mic.monitor`
+  in `linux_audio.sh` is what makes `DevinMicSrc` appear. Devices added while Zoom is running
+  do show up in the picker.
