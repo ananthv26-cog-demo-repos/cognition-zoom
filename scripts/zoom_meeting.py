@@ -14,6 +14,8 @@ Creating only needs meeting:write:meeting:admin. A join-before-host meeting stay
 "in progress" while anyone is connected and blocks other meetings on the host
 account, so the parent should --end it when the demo is over.
 """
+from __future__ import annotations
+
 import argparse
 import base64
 import datetime as dt
@@ -121,6 +123,7 @@ def summarize(m: dict) -> dict:
         "passcode": m.get("password"),
         "join_url": m.get("join_url"),
         "web_client_url": f"https://app.zoom.us/wc/join/{mid}?pwd={pwd}",
+        "zoommtg_url": f"zoommtg://zoom.us/join?confno={mid}&pwd={pwd}",
         "join_before_host": m.get("settings", {}).get("join_before_host"),
         "waiting_room": m.get("settings", {}).get("waiting_room"),
     }
