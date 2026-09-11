@@ -4,6 +4,11 @@
   ELEVENLABS_API_KEY=... scripts/speak.py "Hi everyone, this is Devin two."
   scripts/speak.py --voice Roger --wav-out line.wav "..."   # keep the wav
   scripts/speak.py --list-voices
+  scripts/speak.py --if-quiet "..."       # wait a random 0.5-2 s; back off if someone else is talking
+
+--if-quiet is the turn-taking half of listen.py --until-silence: the wav is synthesised first, then the
+meeting audio is watched for a random 0.5-2 s (so two Devins that stop listening at the same moment
+don't start together); if someone speaks, wait for them to finish and retry, up to --max-wait seconds.
 
 Audio path (same devices join_zoom.sh sets up):
   linux: paplay --device=devin_mic <wav>          (DevinMicSrc is Zoom's mic)
@@ -17,13 +22,18 @@ import argparse
 import json
 import os
 import platform
+import random
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import listen  # noqa: E402
 
 API = "https://api.elevenlabs.io/v1"
 DEFAULT_MODEL = "eleven_turbo_v2_5"
@@ -87,6 +97,17 @@ def play(wav_path: str) -> None:
         subprocess.run(["paplay", f"--device={LINUX_SINK}", wav_path], check=True)
 
 
+def wait_for_turn(max_wait: float) -> None:
+    """Block until the meeting has been quiet for a random 0.5-2 s (or max_wait elapses)."""
+    deadline = time.monotonic() + max_wait
+    while time.monotonic() < deadline:
+        if listen.is_quiet(random.uniform(0.5, 2.0)):
+            return
+        print("someone is talking; waiting for them to finish", file=sys.stderr)
+        listen.until_silence(1.5, max(1.0, deadline - time.monotonic()), keep=False)
+    print(f"still busy after {max_wait:g}s; speaking anyway", file=sys.stderr)
+
+
 def fallback(text: str) -> None:
     if platform.system() == "Darwin":
         cmd = ["say", "-a", "BlackHole 2ch", text]
@@ -106,6 +127,8 @@ def main() -> None:
     ap.add_argument("--model", default=os.environ.get("ELEVENLABS_MODEL", DEFAULT_MODEL))
     ap.add_argument("--wav-out", help="also save the generated wav here")
     ap.add_argument("--no-play", action="store_true")
+    ap.add_argument("--if-quiet", action="store_true", help="wait for a gap in the meeting audio before playing")
+    ap.add_argument("--max-wait", type=float, default=30, help="give up waiting for a gap after N s (default 30)")
     ap.add_argument("--list-voices", action="store_true")
     a = ap.parse_args()
 
@@ -122,6 +145,8 @@ def main() -> None:
         if a.no_play:
             sys.exit(f"elevenlabs unavailable ({e}); nothing to write")
         print(f"elevenlabs unavailable ({e}); falling back to system TTS", file=sys.stderr)
+        if a.if_quiet:
+            wait_for_turn(a.max_wait)
         fallback(a.text)
         return
 
@@ -135,6 +160,8 @@ def main() -> None:
             f.write(wav)
         print(f"{len(wav) // 2 / RATE:.1f}s of audio -> {path}")
         if not a.no_play:
+            if a.if_quiet:
+                wait_for_turn(a.max_wait)
             play(path)
     finally:
         if not a.wav_out:

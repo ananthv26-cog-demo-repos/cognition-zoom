@@ -45,7 +45,7 @@ script that implements it is named so nobody has to rediscover it.
 
 - [all] **Zoom captions write "Devon 1" / "Kevin 3" / "Devin Wan".** Zoom's built-in transcriber has no custom
   vocabulary and mishears the name for both `say` and ElevenLabs voices. Nothing on our side fixes Zoom's
-  captions (options: accept it, or feed Zoom third-party captions via its closed-caption API token). Our own
+  captions; accept it, the captions exist to prove real speech is reaching Zoom. Our own
   transcript (`scripts/listen.py`, ElevenLabs Scribe) passes `keyterms=["Devin", "Devin 1", ...]` and gets
   the spelling right; it also post-fixes Devon/Devan/Kevin -> Devin before a digit.
 - [all] **Robotic `say` / `espeak-ng` voices.** `scripts/speak.py` uses ElevenLabs (`eleven_turbo_v2_5`, voice
@@ -55,6 +55,18 @@ script that implements it is named so nobody has to rediscover it.
 - [all] **Hearing the meeting.** The Zoom *speaker* device is the capture point: Linux `parecord
   --device=zoom_out.monitor` (Zoom VoiceEngine plays into `zoom_out`), macOS `ffmpeg -f avfoundation -i
   ":BlackHole 16ch"` (ffmpeg is not preinstalled; `brew install ffmpeg`). `listen.py --seconds N` wraps this.
+- [all] **Third-party captions (closed-caption API token) don't render in a host-less meeting.** Tried it:
+  `GET /meetings/{id}/token?type=closed_caption_token` needs scope `meeting:read:token:admin` plus the account
+  settings "Manual captions" + "Allow use of caption API Token"; POSTs to the returned URL with `seq=N&lang=en-US`
+  and a text/plain body return 200 (out-of-order `seq` -> 403), yet no client showed them. Presumably a host has to
+  enable manual captioning in-meeting. Dropped in favour of native captions; the token URL is a credential.
+- [linux] **`parecord` default latency is ~2 s.** For level metering / turn detection pass `--latency-msec=100`,
+  otherwise "is anyone talking?" checks answer for two seconds ago. Also, a null sink with no playback stream
+  suspends and its monitor delivers frames slowly, so count frames rather than wall-clock when measuring silence
+  (Zoom keeps the sink awake while connected).
+- [all] **Turn-taking.** `listen.py --until-silence 2` (return when the current speaker has paused 2 s) then
+  `speak.py --if-quiet` (random 0.5-2 s check, wait out anyone who started first). RMS threshold
+  `ZOOM_SPEECH_RMS=300`; Zoom's decoded speech sits around 1000-4000, silence on the null sink is 0.
 - [all] **ElevenLabs voice names carry a description** (`"Roger - Laid-Back, Casual, Resonant"`); match on the part
   before ` - `. `speak.py --voice` accepts either the short name or a voice_id.
 

@@ -4,6 +4,11 @@
   scripts/listen.py --seconds 15                 # record the meeting for 15 s, print the transcript
   scripts/listen.py --file meeting.wav           # transcribe an existing file
   scripts/listen.py --seconds 10 --json          # words with speaker_id + timestamps
+  scripts/listen.py --until-silence 2            # wait for someone to talk, stop 2 s after they finish
+
+Turn-taking (what a human does): `--until-silence` returns the moment the current speaker stops, so a
+Devin can read the transcript, decide its reply and call speak.py --if-quiet, which re-checks the line
+for a random 0.5-2 s before talking and backs off if someone else started first.
 
 Capture path (the speaker device join_zoom.sh tells you to pick in Zoom):
   linux: parecord --device=zoom_out.monitor       (Zoom speaker = ZoomOut)
@@ -13,16 +18,20 @@ Keyterms bias the model towards our names so "Devin" does not come back as Devon
 from __future__ import annotations
 
 import argparse
+import array
 import json
+import math
 import os
 import platform
 import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import uuid
+import wave
 
 API = "https://api.elevenlabs.io/v1"
 MODEL = os.environ.get("ELEVENLABS_STT_MODEL", "scribe_v2")
@@ -31,6 +40,87 @@ KEYTERMS = ["Devin", "Devin 1", "Devin 2", "Devin 3", "Cognition", "Wispr Flow",
 # Kevin in ordinary prose is left alone.
 MISHEARD = re.compile(r"\b(Devon|Devan|Deven|Kevin|Divin)('s)?(?=\s+(\d+|one|two|three)\b)", re.I)
 LINUX_SOURCE = os.environ.get("ZOOM_OUT_SOURCE", "zoom_out.monitor")
+RATE = 16000
+FRAME = RATE // 10  # 100 ms of s16le mono
+SPEECH_RMS = int(os.environ.get("ZOOM_SPEECH_RMS", "300"))  # Zoom's decoded speech sits around 1000-4000
+
+
+def pcm_stream() -> subprocess.Popen:
+    """Raw s16le mono 16 kHz from the virtual speaker device on stdout."""
+    if platform.system() == "Darwin":
+        cmd = ["ffmpeg", "-loglevel", "error", "-f", "avfoundation", "-i", ":BlackHole 16ch",
+               "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"]
+    else:
+        # default record latency is ~2 s of buffering, far too laggy for turn detection
+        cmd = ["parecord", f"--device={LINUX_SOURCE}", "--raw", "--format=s16le", "--channels=1",
+               f"--rate={RATE}", "--latency-msec=100"]
+    return subprocess.Popen(cmd, stdout=subprocess.PIPE)
+
+
+def rms(buf: bytes) -> int:
+    samples = array.array("h", buf)
+    return int(math.sqrt(sum(s * s for s in samples) / len(samples))) if samples else 0
+
+
+def frames(proc: subprocess.Popen):
+    while True:
+        buf = proc.stdout.read(FRAME * 2)
+        if len(buf) < FRAME * 2:
+            return
+        yield buf, rms(buf)
+
+
+def is_quiet(seconds: float) -> bool:
+    """True if nobody in the meeting spoke during the next `seconds`."""
+    proc = pcm_stream()
+    try:
+        n = 0
+        for _, level in frames(proc):
+            if level >= SPEECH_RMS:
+                return False
+            n += 1
+            if n * 0.1 >= seconds:
+                return True
+        return True
+    finally:
+        proc.kill()
+
+
+def until_silence(silence: float, max_seconds: float, keep: bool = True) -> bytes | None:
+    """Listen from the first speech until `silence` seconds of quiet (or max_seconds total).
+
+    Returns the raw PCM heard (empty if keep=False), or None if nobody spoke."""
+    proc = pcm_stream()
+    pcm: list[bytes] = []
+    started = time.monotonic()
+    quiet = 0.0
+    heard = False
+    try:
+        for buf, level in frames(proc):
+            if keep:
+                pcm.append(buf)
+            if level >= SPEECH_RMS:
+                heard, quiet = True, 0.0
+            elif heard:
+                quiet += 0.1
+                if quiet >= silence:
+                    break
+            if time.monotonic() - started >= max_seconds:
+                break
+    finally:
+        proc.kill()
+    return b"".join(pcm) if heard else None
+
+
+def record_until_silence(silence: float, max_seconds: float, path: str) -> None:
+    pcm = until_silence(silence, max_seconds)
+    if pcm is None:
+        sys.exit(f"nobody spoke within {max_seconds:g}s")
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(pcm)
 
 
 def record(seconds: int, path: str) -> None:
@@ -88,6 +178,9 @@ def main() -> None:
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--seconds", type=int, help="record the meeting audio for N seconds")
     src.add_argument("--file", help="transcribe this audio file instead of recording")
+    src.add_argument("--until-silence", type=float, metavar="SECS",
+                     help="wait for speech, then stop after SECS of silence (turn-taking)")
+    ap.add_argument("--max", type=float, default=90, help="cap for --until-silence in seconds (default 90)")
     ap.add_argument("--keep", help="save the recording to this path")
     ap.add_argument("--json", action="store_true", help="print the raw Scribe response")
     a = ap.parse_args()
@@ -96,13 +189,15 @@ def main() -> None:
         sys.exit("ELEVENLABS_API_KEY not set (listen.py has no offline STT fallback)")
 
     tmp = None
-    if a.seconds and not a.keep:
+    if not a.file and not a.keep:
         fd, tmp = tempfile.mkstemp(suffix=".wav", prefix="listen-")
         os.close(fd)
     path = a.file or a.keep or tmp
     try:
         if a.seconds:
             record(a.seconds, path)
+        elif a.until_silence is not None:
+            record_until_silence(a.until_silence, a.max, path)
         result = transcribe(path)
     finally:
         if tmp and os.path.exists(tmp):
