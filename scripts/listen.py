@@ -11,8 +11,10 @@ Devin can read the transcript, decide its reply and call speak.py --if-quiet, wh
 for a random 0.5-2 s before talking and backs off if someone else started first.
 
 Capture path (the speaker device join_zoom.sh tells you to pick in Zoom):
-  linux: parecord --device=zoom_out.monitor       (Zoom speaker = ZoomOut)
-  macos: ffmpeg -f avfoundation -i ":BlackHole 16ch" (Zoom speaker = BlackHole 16ch; needs `brew install ffmpeg`)
+  linux:   parecord --device=zoom_out.monitor       (Zoom speaker = ZoomOut)
+  macos:   ffmpeg -f avfoundation -i ":BlackHole 16ch" (Zoom speaker = BlackHole 16ch; needs `brew install ffmpeg`)
+  windows: ffmpeg -f dshow -i audio="Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)"  (Zoom speaker = Hi-Fi Cable Input;
+           ffmpeg from the windows blueprint; ZOOM_OUT_DSHOW overrides the device name)
 Keyterms bias the model towards our names so "Devin" does not come back as Devon/Kevin. Stdlib only.
 """
 from __future__ import annotations
@@ -42,6 +44,7 @@ KEYTERMS = ["Devin", "Devin 1", "Devin 2", "Devin 3", "Cognition", "Wispr Flow",
 # Kevin in ordinary prose is left alone.
 MISHEARD = re.compile(r"\b(Devon|Devan|Deven|Kevin|Divin)('s)?(?=\s+(\d+|one|two|three)\b)", re.I)
 LINUX_SOURCE = os.environ.get("ZOOM_OUT_SOURCE", "zoom_out.monitor")
+WIN_SOURCE = os.environ.get("ZOOM_OUT_DSHOW", "Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)")
 RATE = 16000
 FRAME = RATE // 10  # 100 ms of s16le mono
 SPEECH_RMS = int(os.environ.get("ZOOM_SPEECH_RMS", "300"))  # Zoom's decoded speech sits around 1000-4000
@@ -56,29 +59,41 @@ def rms(buf: bytes) -> int:
     return int(math.sqrt(sum(s * s for s in samples) / len(samples))) if samples else 0
 
 
+def ffmpeg_input() -> list[str] | None:
+    """ffmpeg input args for the Zoom speaker device on macOS / Windows; None on Linux (parecord)."""
+    if platform.system() == "Darwin":
+        return ["-f", "avfoundation", "-i", ":BlackHole 16ch"]
+    if platform.system() == "Windows":
+        # dshow buffers ~500 ms by default; 100 ms keeps turn detection responsive
+        return ["-f", "dshow", "-audio_buffer_size", "100", "-i", f"audio={WIN_SOURCE}"]
+    return None
+
+
 class Capture:
     """Raw s16le mono 16 kHz from the virtual speaker device, 100 ms frames via a reader thread so callers
     can enforce wall-clock deadlines even when the recorder stalls."""
 
     def __init__(self) -> None:
-        if platform.system() == "Darwin":
-            cmd = ["ffmpeg", "-loglevel", "error", "-f", "avfoundation", "-i", ":BlackHole 16ch",
-                   "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"]
+        if (src := ffmpeg_input()) is not None:
+            cmd = ["ffmpeg", "-loglevel", "error", *src, "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"]
         else:
             # default record latency is ~2 s of buffering, far too laggy for turn detection
             cmd = ["parecord", f"--device={LINUX_SOURCE}", "--raw", "--format=s16le", "--channels=1",
                    f"--rate={RATE}", "--latency-msec=100"]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         self.q: queue.Queue[bytes | None] = queue.Queue()
-        threading.Thread(target=self._pump, daemon=True).start()
+        self.pump = threading.Thread(target=self._pump, daemon=True)
+        self.pump.start()
 
     def _pump(self) -> None:
-        while True:
-            buf = self.proc.stdout.read(FRAME * 2)
-            if len(buf) < FRAME * 2:
-                self.q.put(None)
-                return
-            self.q.put(buf)
+        # sole owner of the pipe: closes it on EOF, so teardown never closes it under a blocked read
+        with self.proc.stdout as out:
+            while True:
+                buf = out.read(FRAME * 2)
+                if len(buf) < FRAME * 2:
+                    self.q.put(None)
+                    return
+                self.q.put(buf)
 
     def frames(self, deadline: float):
         """Yield (pcm, rms) until `deadline` (monotonic). Raises CaptureError on recorder EOF or a 3 s stall."""
@@ -100,9 +115,16 @@ class Capture:
         return self
 
     def __exit__(self, *exc) -> None:
-        self.proc.kill()
+        if platform.system() == "Windows":
+            # ffmpeg on PATH is usually a chocolatey shim: kill the tree so the real recorder goes with it
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(self.proc.pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            self.proc.kill()
         self.proc.wait()
-        self.proc.stdout.close()
+        self.pump.join(timeout=5)
+        if self.pump.is_alive():
+            raise CaptureError("recorder still holds the audio pipe 5 s after being killed")
 
 
 def is_quiet(seconds: float) -> bool:
@@ -154,15 +176,18 @@ def record_until_silence(silence: float, max_seconds: float, path: str) -> None:
 
 
 def record(seconds: int, path: str) -> None:
-    if platform.system() == "Darwin":
-        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "avfoundation", "-i", ":BlackHole 16ch",
-               "-t", str(seconds), "-ac", "1", "-ar", "16000", path]
+    if os.path.exists(path):
+        os.remove(path)
+    if (src := ffmpeg_input()) is not None:
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", *src, "-t", str(seconds), "-ac", "1", "-ar", str(RATE), path]
+        ok = subprocess.run(cmd, check=False).returncode == 0
     else:
         cmd = ["parecord", f"--device={LINUX_SOURCE}", "--file-format=wav", "--channels=1", "--rate=16000",
                f"--process-time-msec={seconds * 1000}", path]
-        cmd = ["timeout", "--preserve-status", str(seconds), *cmd[:-1], path]
-    subprocess.run(cmd, check=False)
-    if not os.path.exists(path) or os.path.getsize(path) < 1000:
+        # parecord runs until killed; timeout ends it with SIGTERM, so its status is not meaningful
+        subprocess.run(["timeout", "--preserve-status", str(seconds), *cmd], check=False)
+        ok = True
+    if not ok or not os.path.exists(path) or os.path.getsize(path) < 1000:
         sys.exit(f"recording failed or empty: {path}")
 
 

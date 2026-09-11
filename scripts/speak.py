@@ -11,9 +11,10 @@ meeting audio is watched for a random 0.5-2 s (so two Devins that stop listening
 don't start together); if someone speaks, wait for them to finish and retry, up to --max-wait seconds.
 
 Audio path (same devices join_zoom.sh sets up):
-  linux: paplay --device=devin_mic <wav>          (DevinMicSrc is Zoom's mic)
-  macos: afplay <wav>  with system output = BlackHole 2ch (SwitchAudioSource -s "BlackHole 2ch")
-Falls back to espeak-ng / say when ELEVENLABS_API_KEY is unset or the API call fails, so a demo never
+  linux:   paplay --device=devin_mic <wav>          (DevinMicSrc is Zoom's mic)
+  macos:   afplay <wav>  with system output = BlackHole 2ch (SwitchAudioSource -s "BlackHole 2ch")
+  windows: System.Media.SoundPlayer <wav> on the default output = CABLE Input (the blueprint sets it; Zoom mic = CABLE Output)
+Falls back to espeak-ng / say / System.Speech when ELEVENLABS_API_KEY is unset or the API call fails, so a demo never
 goes silent. Stdlib only.
 """
 from __future__ import annotations
@@ -90,9 +91,19 @@ def tts_wav(text: str, voice: str, model: str) -> bytes:
     return header + pcm
 
 
+def ps(script: str) -> None:
+    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], check=True)
+
+
+def ps_quote(s: str) -> str:
+    return "'" + s.replace("'", "''") + "'"
+
+
 def play(wav_path: str) -> None:
     if platform.system() == "Darwin":
         subprocess.run(["afplay", wav_path], check=True)
+    elif platform.system() == "Windows":
+        ps(f"(New-Object System.Media.SoundPlayer {ps_quote(os.path.abspath(wav_path))}).PlaySync()")
     else:
         subprocess.run(["paplay", f"--device={LINUX_SINK}", wav_path], check=True)
 
@@ -115,6 +126,13 @@ def wait_for_turn(max_wait: float) -> None:
 def fallback(text: str) -> None:
     if platform.system() == "Darwin":
         cmd = ["say", "-a", "BlackHole 2ch", text]
+    elif platform.system() == "Windows":
+        try:
+            ps("Add-Type -AssemblyName System.Speech; "
+               f"(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak({ps_quote(text)})")
+        except subprocess.CalledProcessError as e:
+            sys.exit(f"fallback TTS System.Speech exited {e.returncode}")
+        return
     elif shutil.which("espeak-ng"):
         cmd = ["espeak-ng", text]
     else:
