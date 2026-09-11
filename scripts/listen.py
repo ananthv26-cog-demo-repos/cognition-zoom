@@ -39,10 +39,10 @@ import wave
 
 API = "https://api.elevenlabs.io/v1"
 MODEL = os.environ.get("ELEVENLABS_STT_MODEL", "scribe_v2")
-KEYTERMS = ["Devin", "Devin 1", "Devin 2", "Devin 3", "Cognition", "Wispr Flow", "Zoom"]
+KEYTERMS = ["Devin", "Devin Child", "Devin Parent", "Devin 1", "Devin 2", "Devin 3", "Cognition", "Wispr Flow", "Zoom"]
 # Only rewrite when the word is used as one of our participant names ("Kevin 3", "Devon two"), so a real
 # Kevin in ordinary prose is left alone.
-MISHEARD = re.compile(r"\b(Devon|Devan|Deven|Kevin|Divin)('s)?(?=\s+(\d+|one|two|three)\b)", re.I)
+MISHEARD = re.compile(r"\b(Devon|Devan|Deven|Kevin|Divin)('s)?(?=\s+(child|parent|\d+|one|two|three)\b)", re.I)
 LINUX_SOURCE = os.environ.get("ZOOM_OUT_SOURCE", "zoom_out.monitor")
 WIN_SOURCE = os.environ.get("ZOOM_OUT_DSHOW", "Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)")
 RATE = 16000

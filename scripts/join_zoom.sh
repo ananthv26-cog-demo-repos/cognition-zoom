@@ -23,7 +23,10 @@
 #   macOS auto mode skips the desktop app if its binary does not match `uname -m`
 #   (the generic Zoom.pkg is x86_64-only and fails with -10669 on arm64); Linux auto
 #   mode skips it when /usr/bin/zoom is not installed.
-#   On macOS, Notification Center banners are closed first (dismiss_notifications.sh).
+#   On macOS, Notification Center banners are closed first (dismiss_notifications.sh)
+#   and approve_mic_prompts.sh is launched to auto-Allow the devin-remote mic TCC
+#   dialog. Afterwards, run show_meeting_window.sh if the Zoom Workplace sign-in
+#   window is on screen instead of the join preview / meeting window.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +66,7 @@ launch_chrome() {
 case "$(uname -s)" in
   Darwin)
     "$HERE/dismiss_notifications.sh" || true
+    nohup "$HERE/approve_mic_prompts.sh" >/dev/null 2>&1 &
     MODE="${ZOOM_JOIN_MODE:-}"
     if [ -z "$MODE" ]; then
       if zoom_app_runnable; then MODE=desktop

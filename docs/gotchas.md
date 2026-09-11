@@ -46,8 +46,8 @@ script that implements it is named so nobody has to rediscover it.
 - [all] **Zoom captions write "Devon 1" / "Kevin 3" / "Devin Wan".** Zoom's built-in transcriber has no custom
   vocabulary and mishears the name for both `say` and ElevenLabs voices. Nothing on our side fixes Zoom's
   captions; accept it, the captions exist to prove real speech is reaching Zoom. Our own
-  transcript (`scripts/listen.py`, ElevenLabs Scribe) passes `keyterms=["Devin", "Devin 1", ...]` and gets
-  the spelling right; it also post-fixes Devon/Devan/Kevin -> Devin before a digit.
+  transcript (`scripts/listen.py`, ElevenLabs Scribe) passes `keyterms=["Devin", "Devin Child", "Devin Parent", ...]`
+  and gets the spelling right; it also post-fixes Devon/Devan/Kevin -> Devin before a digit or "child"/"parent".
 - [all] **Robotic `say` / `espeak-ng` voices.** `scripts/speak.py` uses ElevenLabs (`eleven_turbo_v2_5`, voice
   names like `Roger`, `Sarah`; `--list-voices`) and writes the returned PCM as a wav so it plays through the same
   `paplay --device=devin_mic` / `afplay` / Windows `System.Media.SoundPlayer` path. Without `ELEVENLABS_API_KEY`
@@ -84,14 +84,25 @@ script that implements it is named so nobody has to rediscover it.
 - [mac] **Notification banners cover the Zoom window and eat clicks** ("Zoom can run in the background",
   "Google Chrome Notifications"). `scripts/dismiss_notifications.sh` closes them via the Accessibility API
   (no TCC prompt on the VM); `join_zoom.sh` runs it first. Re-run whenever a screenshot shows a banner.
-- [mac] **macOS TCC prompt "devin-remote would like to access the Microphone".** Click **Allow** once.
+- [mac] **macOS TCC prompt "devin-remote would like to access the Microphone" sits and blocks the mic.**
+  `scripts/approve_mic_prompts.sh` (auto-started by `join_zoom.sh`, re-armed by `speak.py`, ~10-min singleton
+  watcher) clicks **Allow** via the Accessibility API. If it is sitting anyway: click Allow by hand and
+  `scripts/approve_mic_prompts.sh &` (or `APPROVE_MIC_WATCH_SECONDS=1800 ...` for a longer window).
 - [mac] **Routing TTS into Zoom.** `SwitchAudioSource -s "BlackHole 2ch"` makes system output the Zoom mic, so
   plain `say "..."` is heard by Zoom. Pick speaker = BlackHole 16ch in Zoom, *not* "Same as System": with
   system output on BlackHole 2ch, "Same as System" would send the meeting's audio straight back into the mic.
 - [mac] **Plain `say` is silent in the meeting even though system output is BlackHole 2ch** (2 of 3 trio VMs).
   Use `say -a "BlackHole 2ch" "..."` (explicit audio device); `speak.py` does this in its fallback. Two VMs also
   found Zoom had defaulted the *speaker* to BlackHole 2ch (= the mic): open Audio ^ and pick 16ch by hand.
-- [mac] **`say` triggers the TCC microphone prompt for devin-remote** the first time audio flows; **Allow**.
+- [mac] **`say` triggers the TCC microphone prompt for devin-remote** the first time audio flows; the watcher
+  above auto-Allows it. On macOS the meeting window can also be hidden behind the "Zoom Workplace" sign-in
+  home window — `scripts/show_meeting_window.sh "<join_url>" "<topic>"` raises the real one (or re-fires the
+  deep link if only the home window is open).
+- [all] **A child ends up on the "Zoom Workplace" Sign in page instead of in the meeting.** That window is a
+  decoy that every join opens alongside the real one. Raise the meeting window (or re-fire the deep link):
+  `scripts/show_meeting_window.sh "<join_url>" "<topic>"` on macOS/Linux; on Windows re-run
+  `Start-Process "zoommtg://..."` and `(New-Object -ComObject WScript.Shell).AppActivate('<topic>')`.
+  Never sign in — guest joins need no account.
 - [mac] **Safari web client shows no mic level on `say`** and offers only "Same as System" for the speaker.
   Treat Safari as join-only; use the desktop app.
 
