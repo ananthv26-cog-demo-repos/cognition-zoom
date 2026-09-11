@@ -86,12 +86,14 @@ class Capture:
         self.pump.start()
 
     def _pump(self) -> None:
-        while True:
-            buf = self.proc.stdout.read(FRAME * 2)
-            if len(buf) < FRAME * 2:
-                self.q.put(None)
-                return
-            self.q.put(buf)
+        # sole owner of the pipe: closes it on EOF, so teardown never closes it under a blocked read
+        with self.proc.stdout as out:
+            while True:
+                buf = out.read(FRAME * 2)
+                if len(buf) < FRAME * 2:
+                    self.q.put(None)
+                    return
+                self.q.put(buf)
 
     def frames(self, deadline: float):
         """Yield (pcm, rms) until `deadline` (monotonic). Raises CaptureError on recorder EOF or a 3 s stall."""
@@ -121,9 +123,8 @@ class Capture:
             self.proc.kill()
         self.proc.wait()
         self.pump.join(timeout=5)
-        if self.pump.is_alive():  # recorder tree still holds the pipe; closing it under the reader would race
-            return
-        self.proc.stdout.close()
+        if self.pump.is_alive():
+            raise CaptureError("recorder still holds the audio pipe 5 s after being killed")
 
 
 def is_quiet(seconds: float) -> bool:
