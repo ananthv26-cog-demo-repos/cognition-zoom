@@ -9,7 +9,8 @@ VMs) join it as named guests — the Zoom desktop app on macOS, Zoom's web clien
 | Path | Purpose |
 |------|---------|
 | `scripts/zoom_meeting.py` | Server-to-Server OAuth token + `POST /users/{host}/meetings`; prints `join_url`, a web-client URL and a `zoommtg://` deep link. `--end ID` ends it when the demo is over; `--list-live`, `--delete ID` (each needs its scope, see Secrets). |
-| `scripts/join_zoom.sh` | `join_zoom.sh <url> [display name]`. macOS: Zoom desktop app via `zoommtg://` (default), or `ZOOM_JOIN_MODE=safari|chrome` for the web client. Linux: plain Chrome (own profile, no automation flags) so the join is not blocked as a bot. |
+| `scripts/join_zoom.sh` | `join_zoom.sh <url> [display name]`. macOS: Zoom desktop app via `zoommtg://` (default when the app matches `uname -m`), or `ZOOM_JOIN_MODE=safari|chrome` for the web client. Linux: plain Chrome (own profile, no automation flags) so the join is not blocked as a bot. |
+| `scripts/dismiss_notifications.sh` | macOS: closes every Notification Center banner (Zoom background-activity, Chrome notification prompts) via Accessibility so they do not cover the Zoom window. Run by `join_zoom.sh`; rerun whenever a banner shows up. |
 | `.agents/skills/zoom-meeting/SKILL.md` | Step-by-step skill Devin sessions in this repo auto-load: create, hand off, join, set audio devices. |
 | `docs/wispr-zoom-demo-feasibility.md` | Audio architecture for the Mac VMs (BlackHole, Wispr Flow, realtime voice). |
 
@@ -53,6 +54,7 @@ scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>"
   | `brew install switchaudio-osx` + `SwitchAudioSource -s "BlackHole 2ch"` | ok (already installed) | 1 s |
   | `curl -L -o Zoom.pkg https://zoom.us/client/latest/Zoom.pkg` + `sudo installer -pkg Zoom.pkg -target /` | installs but **x86_64-only**; `open` fails with error -10669 ("Bad CPU type") | 1 s + 6 s |
   | `curl -sL -o Zoom-arm64.pkg "https://zoom.us/client/latest/Zoom.pkg?archType=arm64"` + `sudo installer -pkg Zoom-arm64.pkg -target /` | ok, arm64 `/Applications/zoom.us.app` (Zoom Workplace 7.1.5) | <1 s + 4 s |
+  | `scripts/dismiss_notifications.sh` | closed 3 + 1 banners (Zoom background activity, 2x Chrome notifications) in ~1.5 s, no permission prompt | 2 s |
   | `open "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Devin%201b"` | desktop app opens preview with name, joins as guest; device picker lists BlackHole 2ch/16ch; **live captions transcribe `say`** | — |
   | `python3 scripts/zoom_meeting.py --delete <id>` | not run: fails with 400/4711 while scope `meeting:delete:meeting:admin` is missing (use `--end` once its scope is granted) | — |
 

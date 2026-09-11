@@ -59,8 +59,15 @@ sudo installer -pkg ~/Zoom-arm64.pkg -target /         # ~5 s -> /Applications/z
 # per meeting
 SwitchAudioSource -s "BlackHole 2ch"                   # system output -> Zoom mic
 scripts/join_zoom.sh "<web_client_url_or_join_url>" "Devin 1"
-# = open "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Devin%201"
+# = scripts/dismiss_notifications.sh (closes Notification Center banners), then
+#   open "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Devin%201"
 ```
+
+**Always clear macOS notifications before and during computer use.** Zoom and Chrome raise banners in the
+top-right ("Zoom can run in the background", "Google Chrome Notifications" Allow/Don't Allow) that cover the
+Zoom window and steal clicks. `scripts/dismiss_notifications.sh` presses Close / Clear All / Don't Allow on every
+banner via the Accessibility API (verified: 4 banners gone in <2 s, no TCC prompt on the Devin VM). `join_zoom.sh`
+runs it first; run it again whenever a screenshot shows a banner, before clicking anything else.
 
 Then with computer use:
 1. Preview window shows the pre-filled name; dismiss the "update being installed" dialog (**Not Now**), click **Join**.
@@ -76,7 +83,8 @@ Then with computer use:
 Gotchas:
 - `https://zoom.us/client/latest/Zoom.pkg` (no `archType`) is an **x86_64-only** build; on the arm64 VM `open`
   fails with `_LSOpenURLsWithCompletionHandler() failed ... error -10669` and the binary says "Bad CPU type".
-  Use `?archType=arm64` (or install Rosetta).
+  Use `?archType=arm64` (or install Rosetta). `join_zoom.sh` auto mode checks `lipo -archs` against `uname -m`
+  and falls back to Chrome/Safari when the installed app is the wrong architecture.
 - Prefer `--end` over `--delete` for cleanup; both need their scope on the app (400/4711 otherwise).
 
 ### Web client alternatives on macOS (both verified, no bot block)

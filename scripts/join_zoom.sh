@@ -14,8 +14,18 @@
 # reCAPTCHA gate). Drive the window with computer use afterwards.
 #
 # Usage: join_zoom.sh <web_client_url_or_join_url> [display_name]
-#   ZOOM_JOIN_MODE=desktop|safari|chrome overrides the macOS default.
+#   ZOOM_JOIN_MODE=desktop|safari|chrome overrides the macOS default. Auto mode
+#   skips the desktop app if its binary does not match `uname -m` (the generic
+#   Zoom.pkg is x86_64-only and fails with -10669 on arm64).
+#   On macOS, Notification Center banners are closed first (dismiss_notifications.sh).
 set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ZOOM_APP=/Applications/zoom.us.app
+
+zoom_app_runnable() {
+  [ -d "$ZOOM_APP" ] && lipo -archs "$ZOOM_APP/Contents/MacOS/zoom.us" 2>/dev/null | grep -qE "(^| )$(uname -m)e?( |$)"
+}
 
 URL="${1:?usage: join_zoom.sh <zoom url> [display name]}"
 NAME="${2:-}"
@@ -35,11 +45,13 @@ launch_chrome() {
 
 case "$(uname -s)" in
   Darwin)
+    "$HERE/dismiss_notifications.sh" || true
     MODE="${ZOOM_JOIN_MODE:-}"
     if [ -z "$MODE" ]; then
-      if [ -d /Applications/zoom.us.app ]; then MODE=desktop
+      if zoom_app_runnable; then MODE=desktop
       elif [ -d "/Applications/Google Chrome.app" ]; then MODE=chrome
       else MODE=safari; fi
+      [ -d "$ZOOM_APP" ] && [ "$MODE" != desktop ] && echo "zoom.us.app is not built for $(uname -m); falling back to $MODE" >&2
     fi
     case "$MODE" in
       desktop)
