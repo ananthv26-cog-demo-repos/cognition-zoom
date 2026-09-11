@@ -14,12 +14,37 @@
 # Pass the display name so a re-fired join keeps the roster identity.
 # ZOOM_NO_REFIRE=1 only waits and raises (join_zoom.sh uses it right after it
 # launches Zoom, when re-firing would just start a second join).
+# ZOOM_PRIOR_WINDOWS holds the output of `show_meeting_window.sh --snapshot`
+# taken before the deep link was fired; those windows (a meeting Zoom was
+# already showing) are never accepted as the one being waited for.
 # On Windows use the PowerShell equivalent in SKILL.md §4.
 set -uo pipefail
+
+if [ "${1:-}" = --snapshot ]; then
+  case "$(uname -s)" in
+    Darwin)
+      osascript -e 'tell application "System Events"
+        if not (exists process "zoom.us") then return ""
+        set out to ""
+        repeat with w in windows of process "zoom.us"
+          try
+            set out to out & (name of w) & linefeed
+          end try
+        end repeat
+        return out
+      end tell' ;;
+    Linux)
+      export DISPLAY="${DISPLAY:-:0}"
+      pids="$(pgrep -x zoom; pgrep -f '/opt/zoom/zoom')"
+      [ -n "$pids" ] && wmctrl -lp | awk -v pids="^($(tr '\n' '|' <<<"$pids" | sed 's/|$//'))$" '$3 ~ pids { print $1 }' ;;
+  esac
+  exit 0
+fi
 
 URL="${1:?usage: show_meeting_window.sh <zoom url> [window title substring] [display name]}"
 WANT="${2:-}"
 NAME="${3:-}"
+PRIOR="${ZOOM_PRIOR_WINDOWS:-}"
 WAIT="${ZOOM_WINDOW_WAIT:-60}"
 # how long a windowless Zoom process is assumed to be starting up before it is
 # treated as an idle background client that needs the deep link again
@@ -41,9 +66,10 @@ deep_link() {
 # Each attempt prints one of: "raised <title>" | "starting" (Zoom is up but has
 # not mapped a window yet) | "home-only" | "no-zoom".
 mac_attempt() {
-  osascript - "$WANT" <<'EOF'
+  osascript - "$WANT" "$PRIOR" <<'EOF'
 on run argv
   set wantTitle to item 1 of argv
+  set priorTitles to paragraphs of (item 2 of argv)
   tell application "System Events"
     if not (exists process "zoom.us") then return "no-zoom"
     tell process "zoom.us"
@@ -52,7 +78,7 @@ on run argv
         repeat with w in windows
           try
             -- never accept the home/sign-in window even if the topic matches it
-            if (name of w) contains wantTitle and (name of w) does not contain "Zoom Workplace" then
+            if (name of w) contains wantTitle and (name of w) does not contain "Zoom Workplace" and priorTitles does not contain (name of w) then
               perform action "AXRaise" of w
               set frontmost to true
               return "raised " & (name of w)
@@ -63,7 +89,7 @@ on run argv
       repeat with w in windows
         try
           set n to name of w
-          if n does not contain "Zoom Workplace" and n does not contain "Settings" then
+          if n does not contain "Zoom Workplace" and n does not contain "Settings" and priorTitles does not contain n then
             perform action "AXRaise" of w
             set frontmost to true
             return "raised " & n
@@ -91,6 +117,7 @@ linux_attempt() {
     local wid title
     while IFS=$'\t' read -r wid title; do
       case "$title" in *"Zoom Workplace"*|Settings) continue;; esac
+      grep -qxF -- "$wid" <<<"$PRIOR" && continue
       [ -n "$1" ] && ! grep -qF -- "$1" <<<"$title" && continue
       wmctrl -i -a "$wid" && { found="$title"; return 0; }
     done <<<"$rows"

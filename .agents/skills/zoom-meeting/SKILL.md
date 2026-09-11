@@ -144,7 +144,9 @@ scripts/join_zoom.sh "<join_url_or_web_client_url>" "Linux VM 1"
 `join_zoom.sh` does not return until the meeting window is actually on screen (and fails if it never appears) —
 Zoom took 28-45 s to map it on this VM, and a screenshot before that still shows the old desktop
 (`ZOOM_WINDOW_WAIT`, default 60 s, caps the wait). A Zoom left running with no windows is re-sent the deep link
-after `ZOOM_START_GRACE` (25 s), since it never grows a meeting window on its own.
+after `ZOOM_START_GRACE` (25 s), since it never grows a meeting window on its own. Windows Zoom already had
+before the deep link (a previous meeting still open) are snapshotted (`show_meeting_window.sh --snapshot`) and
+never count as the new meeting — leave the old meeting first or the wait times out.
 
 Then with computer use (`DISPLAY=:0`; `scripts/show_meeting_window.sh "<join_url>" "<topic>"` — or
 `wmctrl -a "<topic>"` — brings the meeting window to the front, waits for it if Zoom is still starting, and
