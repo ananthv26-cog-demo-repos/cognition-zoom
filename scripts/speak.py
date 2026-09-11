@@ -100,11 +100,15 @@ def play(wav_path: str) -> None:
 def wait_for_turn(max_wait: float) -> None:
     """Block until the meeting has been quiet for a random 0.5-2 s (or max_wait elapses)."""
     deadline = time.monotonic() + max_wait
-    while time.monotonic() < deadline:
-        if listen.is_quiet(random.uniform(0.5, 2.0)):
-            return
-        print("someone is talking; waiting for them to finish", file=sys.stderr)
-        listen.until_silence(1.5, max(1.0, deadline - time.monotonic()), keep=False)
+    try:
+        while (remaining := deadline - time.monotonic()) > 0:
+            if listen.is_quiet(min(random.uniform(0.5, 2.0), remaining)):
+                return
+            print("someone is talking; waiting for them to finish", file=sys.stderr)
+            if (remaining := deadline - time.monotonic()) > 0:
+                listen.until_silence(1.5, remaining, keep=False)
+    except listen.CaptureError as e:
+        sys.exit(f"--if-quiet cannot hear the meeting ({e}); check the Zoom speaker device / recorder")
     print(f"still busy after {max_wait:g}s; speaking anyway", file=sys.stderr)
 
 
@@ -131,6 +135,8 @@ def main() -> None:
     ap.add_argument("--max-wait", type=float, default=30, help="give up waiting for a gap after N s (default 30)")
     ap.add_argument("--list-voices", action="store_true")
     a = ap.parse_args()
+    if not (0 < a.max_wait < 3600):
+        ap.error("--max-wait must be between 0 and 3600 seconds")
 
     if a.list_voices:
         for v in list_voices():

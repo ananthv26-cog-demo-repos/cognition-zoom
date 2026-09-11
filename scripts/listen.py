@@ -23,10 +23,12 @@ import json
 import math
 import os
 import platform
+import queue
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -45,16 +47,8 @@ FRAME = RATE // 10  # 100 ms of s16le mono
 SPEECH_RMS = int(os.environ.get("ZOOM_SPEECH_RMS", "300"))  # Zoom's decoded speech sits around 1000-4000
 
 
-def pcm_stream() -> subprocess.Popen:
-    """Raw s16le mono 16 kHz from the virtual speaker device on stdout."""
-    if platform.system() == "Darwin":
-        cmd = ["ffmpeg", "-loglevel", "error", "-f", "avfoundation", "-i", ":BlackHole 16ch",
-               "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"]
-    else:
-        # default record latency is ~2 s of buffering, far too laggy for turn detection
-        cmd = ["parecord", f"--device={LINUX_SOURCE}", "--raw", "--format=s16le", "--channels=1",
-               f"--rate={RATE}", "--latency-msec=100"]
-    return subprocess.Popen(cmd, stdout=subprocess.PIPE)
+class CaptureError(RuntimeError):
+    """The recorder died or stopped delivering audio: the state of the line is unknown, not silent."""
 
 
 def rms(buf: bytes) -> int:
@@ -62,41 +56,78 @@ def rms(buf: bytes) -> int:
     return int(math.sqrt(sum(s * s for s in samples) / len(samples))) if samples else 0
 
 
-def frames(proc: subprocess.Popen):
-    while True:
-        buf = proc.stdout.read(FRAME * 2)
-        if len(buf) < FRAME * 2:
-            return
-        yield buf, rms(buf)
+class Capture:
+    """Raw s16le mono 16 kHz from the virtual speaker device, 100 ms frames via a reader thread so callers
+    can enforce wall-clock deadlines even when the recorder stalls."""
+
+    def __init__(self) -> None:
+        if platform.system() == "Darwin":
+            cmd = ["ffmpeg", "-loglevel", "error", "-f", "avfoundation", "-i", ":BlackHole 16ch",
+                   "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"]
+        else:
+            # default record latency is ~2 s of buffering, far too laggy for turn detection
+            cmd = ["parecord", f"--device={LINUX_SOURCE}", "--raw", "--format=s16le", "--channels=1",
+                   f"--rate={RATE}", "--latency-msec=100"]
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        self.q: queue.Queue[bytes | None] = queue.Queue()
+        threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self) -> None:
+        while True:
+            buf = self.proc.stdout.read(FRAME * 2)
+            if len(buf) < FRAME * 2:
+                self.q.put(None)
+                return
+            self.q.put(buf)
+
+    def frames(self, deadline: float):
+        """Yield (pcm, rms) until `deadline` (monotonic). Raises CaptureError on recorder EOF or a 3 s stall."""
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            try:
+                buf = self.q.get(timeout=min(remaining, 3.0))
+            except queue.Empty:
+                if time.monotonic() >= deadline:
+                    return
+                raise CaptureError("recorder produced no audio for 3 s")
+            if buf is None:
+                raise CaptureError(f"recorder exited with status {self.proc.wait()}")
+            yield buf, rms(buf)
+
+    def __enter__(self) -> "Capture":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.proc.kill()
+        self.proc.wait()
+        self.proc.stdout.close()
 
 
 def is_quiet(seconds: float) -> bool:
-    """True if nobody in the meeting spoke during the next `seconds`."""
-    proc = pcm_stream()
-    try:
+    """True if nobody in the meeting spoke during the next `seconds`. Raises CaptureError if we could not
+    observe the whole interval (never reports quiet it did not hear)."""
+    with Capture() as cap:
         n = 0
-        for _, level in frames(proc):
+        for _, level in cap.frames(time.monotonic() + seconds + 10.0):  # slack for a slow (suspended) sink
             if level >= SPEECH_RMS:
                 return False
             n += 1
             if n * 0.1 >= seconds:
                 return True
-        return True
-    finally:
-        proc.kill()
+    raise CaptureError(f"only {n * 0.1:.1f}s of {seconds:g}s captured")
 
 
 def until_silence(silence: float, max_seconds: float, keep: bool = True) -> bytes | None:
     """Listen from the first speech until `silence` seconds of quiet (or max_seconds total).
 
     Returns the raw PCM heard (empty if keep=False), or None if nobody spoke."""
-    proc = pcm_stream()
     pcm: list[bytes] = []
-    started = time.monotonic()
     quiet = 0.0
     heard = False
-    try:
-        for buf, level in frames(proc):
+    with Capture() as cap:
+        for buf, level in cap.frames(time.monotonic() + max_seconds):
             if keep:
                 pcm.append(buf)
             if level >= SPEECH_RMS:
@@ -105,15 +136,14 @@ def until_silence(silence: float, max_seconds: float, keep: bool = True) -> byte
                 quiet += 0.1
                 if quiet >= silence:
                     break
-            if time.monotonic() - started >= max_seconds:
-                break
-    finally:
-        proc.kill()
     return b"".join(pcm) if heard else None
 
 
 def record_until_silence(silence: float, max_seconds: float, path: str) -> None:
-    pcm = until_silence(silence, max_seconds)
+    try:
+        pcm = until_silence(silence, max_seconds)
+    except CaptureError as e:
+        sys.exit(f"capture failed: {e}")
     if pcm is None:
         sys.exit(f"nobody spoke within {max_seconds:g}s")
     with wave.open(path, "wb") as w:
@@ -185,6 +215,10 @@ def main() -> None:
     ap.add_argument("--json", action="store_true", help="print the raw Scribe response")
     a = ap.parse_args()
 
+    for name in ("seconds", "until_silence", "max"):
+        v = getattr(a, name)
+        if v is not None and not (0 < v < 3600):
+            ap.error(f"--{name.replace('_', '-')} must be between 0 and 3600 seconds")
     if not os.environ.get("ELEVENLABS_API_KEY"):
         sys.exit("ELEVENLABS_API_KEY not set (listen.py has no offline STT fallback)")
 
