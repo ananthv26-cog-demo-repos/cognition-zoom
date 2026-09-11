@@ -57,15 +57,34 @@ function run(argv) {
 EOF
 }
 
-mac_raise() {  # $1 = window id (unused), $2 = title
-  osascript - "$2" <<'EOF' >/dev/null
+mac_raise() {  # $1 = CoreGraphics window number, $2 = title
+  # Accessibility windows carry no CG number. With one window of that title the
+  # match is exact; with several (recurring topic still open in a stale window)
+  # raise each in turn and accept only when CG (front-to-back order) shows $1 on top.
+  local n i
+  n="$(osascript - "$2" <<'EOF'
 on run argv
   tell application "System Events" to tell process "zoom.us"
-    perform action "AXRaise" of (first window whose name is (item 1 of argv))
+    count (windows whose name is (item 1 of argv))
+  end tell
+end run
+EOF
+)" || return 1
+  for ((i = 1; i <= n; i++)); do
+    osascript - "$2" "$i" <<'EOF' >/dev/null || continue
+on run argv
+  tell application "System Events" to tell process "zoom.us"
+    set same to (windows whose name is (item 1 of argv))
+    perform action "AXRaise" of item ((item 2 of argv) as integer) of same
     set frontmost to true
   end tell
 end run
 EOF
+    [ "$n" = 1 ] && return 0
+    sleep 0.3
+    [ "$(mac_windows | head -n1 | cut -f1)" = "$1" ] && return 0
+  done
+  return 1
 }
 
 linux_windows() {

@@ -141,8 +141,12 @@ class Conversation:
 
     def say(self, text: str) -> None:
         text = text.strip()
-        done = text.endswith("DONE")
-        text = text[: -len("DONE")].rstrip(" .,;") + "." if done else text
+        bare = text.rstrip(" .,;:!?")
+        done = bool(bare) and bare.rsplit(maxsplit=1)[-1] == "DONE"
+        text = bare[: -len("DONE")].rstrip(" .,;:") + "." if done else text
+        if text == ".":  # a bare DONE: nothing to speak, just leave the loop
+            self.record("info", "model signalled DONE without a goodbye line")
+            raise SystemExit(0)
         try:
             if self.voice_id is None:
                 raise RuntimeError("ELEVENLABS_API_KEY not set")

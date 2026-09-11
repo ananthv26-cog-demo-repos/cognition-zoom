@@ -15,7 +15,8 @@ set -euo pipefail
 [ "$(uname -s)" = Darwin ] || { echo "macOS only" >&2; exit 1; }
 
 APP="/Applications/Wispr Flow.app"
-AUTHDB_DIR="${WISPR_AUTHDB_BACKUP_DIR:-$HOME/.wispr_authdb_backup}"
+# Root-owned (0700) so nothing running as the login user can swap a saved policy between grant and restore.
+AUTHDB_DIR="${WISPR_AUTHDB_BACKUP_DIR:-/var/root/wispr_authdb_backup}"
 # The Accessibility toggle in System Settings asks for the local account password. Allowing only
 # system.preferences* does NOT stop the prompt on macOS 26 (authd logs com.apple.DiskManagement.reserveKEK);
 # allowing this whole set did (Mac VM 2, 2026-09-11). Always restore afterwards.
@@ -69,22 +70,28 @@ cmd_devices() {
 cmd_authdb() {
   case "${1:-}" in
     grant)
-      mkdir -p "$AUTHDB_DIR"
+      if sudo test -e "$AUTHDB_DIR"; then
+        echo "a grant is already pending ($AUTHDB_DIR exists); run: $0 authdb restore" >&2; exit 1
+      fi
+      sudo install -d -m 0700 -o root -g wheel "$AUTHDB_DIR"
       for r in "${AUTHDB_RIGHTS[@]}"; do
-        [ -s "$AUTHDB_DIR/$r.plist" ] || sudo security authorizationdb read "$r" > "$AUTHDB_DIR/$r.plist" 2>/dev/null || true
+        sudo security authorizationdb read "$r" 2>/dev/null | sudo tee "$AUTHDB_DIR/$r.plist" >/dev/null || true
+        sudo test -s "$AUTHDB_DIR/$r.plist" || sudo rm -f "$AUTHDB_DIR/$r.plist"  # right did not exist: restore removes it
         sudo security authorizationdb write "$r" allow
       done
       echo "granted; flip System Settings > Privacy & Security > Accessibility > Wispr Flow, then: $0 authdb restore"
       ;;
     restore)
+      sudo test -d "$AUTHDB_DIR" || { echo "nothing to restore: no pending grant in $AUTHDB_DIR" >&2; exit 1; }
       for r in "${AUTHDB_RIGHTS[@]}"; do
-        if [ -s "$AUTHDB_DIR/$r.plist" ]; then
-          sudo security authorizationdb write "$r" < "$AUTHDB_DIR/$r.plist"
+        if sudo test -s "$AUTHDB_DIR/$r.plist"; then
+          sudo sh -c 'security authorizationdb write "$1" < "$2"' _ "$r" "$AUTHDB_DIR/$r.plist"
         else
           sudo security authorizationdb remove "$r" 2>/dev/null || true
         fi
       done
-      echo "authorization rights restored from $AUTHDB_DIR"
+      sudo rm -rf "$AUTHDB_DIR"
+      echo "authorization rights restored; backup consumed"
       ;;
     *) echo "usage: $0 authdb grant|restore" >&2; exit 2 ;;
   esac
@@ -92,11 +99,11 @@ cmd_authdb() {
 
 cmd_layout() {
   # Separate `set position` / `set size` statements: the combined `set {position, size}` form fails with -10003.
-  local bounds w h half
+  local bounds w h half rc=0
   bounds=$(osascript -e 'tell application "Finder" to get bounds of window of desktop')
   w=$(echo "$bounds" | awk -F', ' '{print $3}'); h=$(echo "$bounds" | awk -F', ' '{print $4}')
   half=$((w / 2))
-  osascript - "$half" "$h" <<'EOF' || echo "Zoom meeting window not positioned (is the meeting joined?)" >&2
+  osascript - "$half" "$h" <<'EOF' || { echo "Zoom meeting window not positioned (is the meeting joined?)" >&2; rc=1; }
 on run argv
   set half to (item 1 of argv) as integer
   set h to (item 2 of argv) as integer
@@ -106,7 +113,7 @@ on run argv
   end tell
 end run
 EOF
-  osascript - "$half" "$h" <<'EOF' || echo "Wispr 'Meeting Recorder' window not positioned (start a note first)" >&2
+  osascript - "$half" "$h" <<'EOF' || { echo "Wispr 'Meeting Recorder' window not positioned (start a note first)" >&2; rc=1; }
 on run argv
   set half to (item 1 of argv) as integer
   set h to (item 2 of argv) as integer
@@ -116,7 +123,8 @@ on run argv
   end tell
 end run
 EOF
-  echo "layout: Zoom left, Wispr right (${w}x${h})"
+  [ "$rc" = 0 ] && echo "layout: Zoom left, Wispr right (${w}x${h})"
+  return "$rc"
 }
 
 cmd_status() {
