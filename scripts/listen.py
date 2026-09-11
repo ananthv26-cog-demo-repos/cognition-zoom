@@ -119,16 +119,16 @@ def is_quiet(seconds: float) -> bool:
     raise CaptureError(f"only {n * 0.1:.1f}s of {seconds:g}s captured")
 
 
-def until_silence(silence: float, max_seconds: float, keep: bool = True) -> bytes | None:
+def until_silence(silence: float, max_seconds: float, keep: bool = True, heard: bool = False) -> bytes | None:
     """Listen from the first speech until `silence` seconds of quiet (or max_seconds total).
+    Pass heard=True when the caller already knows someone is talking, so quiet counts from the first frame.
 
-    Returns the raw PCM heard (empty if keep=False), or None if nobody spoke."""
+    Returns the raw PCM from the first speech frame on (empty if keep=False), or None if nobody spoke."""
     pcm: list[bytes] = []
     quiet = 0.0
-    heard = False
     with Capture() as cap:
         for buf, level in cap.frames(time.monotonic() + max_seconds):
-            if keep:
+            if keep and (heard or level >= SPEECH_RMS):
                 pcm.append(buf)
             if level >= SPEECH_RMS:
                 heard, quiet = True, 0.0

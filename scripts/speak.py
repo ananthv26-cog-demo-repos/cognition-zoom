@@ -106,7 +106,7 @@ def wait_for_turn(max_wait: float) -> None:
                 return
             print("someone is talking; waiting for them to finish", file=sys.stderr)
             if (remaining := deadline - time.monotonic()) > 0:
-                listen.until_silence(1.5, remaining, keep=False)
+                listen.until_silence(1.5, remaining, keep=False, heard=True)
     except listen.CaptureError as e:
         sys.exit(f"--if-quiet cannot hear the meeting ({e}); check the Zoom speaker device / recorder")
     print(f"still busy after {max_wait:g}s; speaking anyway", file=sys.stderr)
