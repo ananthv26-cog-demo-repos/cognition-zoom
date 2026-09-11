@@ -254,6 +254,27 @@ scripts/speak.py --if-quiet --voice Roger "..."    # wait a random 0.5-2 s gap; 
   held a 4 s talker off then spoke 2 s later) and live on Windows against a talking Linux participant. Speech threshold `ZOOM_SPEECH_RMS` (default 300; Zoom
   speech is ~1000-4000 RMS). The trio test predates this and used a fixed stagger (Devin n waits (n-1) x 25 s).
 
+## 6. Running the whole demo from one prompt (parent session)
+
+A prompt like "have 2 Mac VMs and 1 Windows VM join the same Zoom and chat with one another" means:
+
+1. `python3 scripts/zoom_meeting.py --list-live` — end any straggler first (one live meeting per host).
+2. `python3 scripts/zoom_meeting.py --topic "Devin standup" --duration 60 --json` — one meeting for everyone.
+3. Start one child Devin session per participant (`macos` / `windows` / default Linux VM), all on this repo,
+   with a prompt that gives each: display name (`Devin 1`, `Devin 2`, ...), a persona, an ElevenLabs voice
+   (`--voice Roger|Sarah|George|...`), the join URL (Mac/Linux: `scripts/join_zoom.sh "<join_url>" "<name>"`;
+   Windows: `Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=<name>"`), the device checks
+   from §2/§3/§4 (Zoom often defaults the speaker to the mic device), "turn captions on", and the loop from §5:
+   `listen.py --until-silence 2 --max 90` -> decide in persona -> `speak.py --if-quiet --max-wait 30 --voice ...`.
+   Tell exactly one child to open the conversation once all names are in the roster; the others speak only when
+   addressed or when a listen cycle comes back empty. Ask for screenshots of the participant list and the
+   captions panel (own line + another Devin's line), a `(heard, said)` log, and "leave, don't end".
+4. Optionally join from the parent VM as `Observer` (Linux §3) to screenshot the roster/captions yourself.
+5. When the children report, `python3 scripts/zoom_meeting.py --end <id>` and confirm with `--list-live`.
+
+Timing seen so far: children take 1-3 min to be in the meeting (snapshot with Zoom preinstalled; ~60 s more
+if the blueprint has to run by hand), a listen/speak turn is 5-15 s, a 6-8 turn conversation is ~8 min.
+
 ## Limits
 - Paid host account: no 40-min cap. Free account: 40-min cap on 3+ participant meetings even with no host present.
 - Nobody in the meeting is host, so nobody can start a cloud recording; record locally if needed.

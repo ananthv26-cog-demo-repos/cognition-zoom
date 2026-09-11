@@ -120,7 +120,9 @@ class Capture:
         else:
             self.proc.kill()
         self.proc.wait()
-        self.pump.join(timeout=2)  # let the reader see EOF before its pipe is closed under it
+        self.pump.join(timeout=5)
+        if self.pump.is_alive():  # recorder tree still holds the pipe; closing it under the reader would race
+            return
         self.proc.stdout.close()
 
 
@@ -173,14 +175,18 @@ def record_until_silence(silence: float, max_seconds: float, path: str) -> None:
 
 
 def record(seconds: int, path: str) -> None:
+    if os.path.exists(path):
+        os.remove(path)
     if (src := ffmpeg_input()) is not None:
         cmd = ["ffmpeg", "-y", "-loglevel", "error", *src, "-t", str(seconds), "-ac", "1", "-ar", str(RATE), path]
+        ok = subprocess.run(cmd, check=False).returncode == 0
     else:
         cmd = ["parecord", f"--device={LINUX_SOURCE}", "--file-format=wav", "--channels=1", "--rate=16000",
                f"--process-time-msec={seconds * 1000}", path]
-        cmd = ["timeout", "--preserve-status", str(seconds), *cmd[:-1], path]
-    subprocess.run(cmd, check=False)
-    if not os.path.exists(path) or os.path.getsize(path) < 1000:
+        # parecord runs until killed; timeout ends it with SIGTERM, so its status is not meaningful
+        subprocess.run(["timeout", "--preserve-status", str(seconds), *cmd], check=False)
+        ok = True
+    if not ok or not os.path.exists(path) or os.path.getsize(path) < 1000:
         sys.exit(f"recording failed or empty: {path}")
 
 
