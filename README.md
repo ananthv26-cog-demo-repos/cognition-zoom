@@ -39,14 +39,20 @@ Voices read, Models) powers `speak.py` / `listen.py`. Without it `speak.py` fall
 python3 scripts/zoom_meeting.py --topic "Devin standup" --duration 60 --json
 # child (macOS): desktop app, name pre-filled; then computer use: Join
 SwitchAudioSource -s "BlackHole 2ch"
-scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>" "Devin 1"
+scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>" "Mac 1"
 # child (Linux): desktop app, name pre-filled, mic=DevinMicSrc speaker=ZoomOut; then computer use: Join
-scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>" "Devin 2"
-PULSE_SINK=devin_mic espeak-ng "Hello from Devin two"     # or: paplay --device=devin_mic tts.wav
+scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>" "Linux 1"
+PULSE_SINK=devin_mic espeak-ng "Hello from Linux one"     # or: paplay --device=devin_mic tts.wav
 # child (Windows, PowerShell): desktop app, name pre-filled, mic=CABLE Output speaker=Hi-Fi Cable Input; then computer use: Join
-#   Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<encrypted_password>&uname=Devin%20Win"
+#   Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<encrypted_password>&uname=Win"
+# naming scheme for the roster: children are "Mac 1"/"Mac 2"/"Win" by OS and the parent's seat
+#   is "Parent" — deliberately no "Devin" in display names since Zoom captions mishear it
+# only seeing a "Zoom Workplace" sign-in window? that's the decoy home window — the join
+#   preview / meeting window is separate: scripts/show_meeting_window.sh "<join_url>" "<topic>" "Mac 1"
+#   (Windows: re-run Start-Process, then (New-Object -ComObject WScript.Shell).AppActivate('<topic>'))
+# macOS: approve_mic_prompts.sh (auto-started by join_zoom.sh) clicks Allow on the devin-remote mic dialog
 # any participant: natural voice in, transcript out (needs ELEVENLABS_API_KEY; Windows: python scripts\speak.py ...)
-scripts/speak.py --voice Roger "Hi everyone, Devin 2 here."
+scripts/speak.py --voice Roger "Hi everyone, Mac 2 here."
 scripts/listen.py --seconds 15
 # conversation loop per Devin: hear a turn, decide, answer in the next gap
 heard=$(scripts/listen.py --until-silence 2 --max 90) && scripts/speak.py --if-quiet --voice Roger "<reply to $heard>"
