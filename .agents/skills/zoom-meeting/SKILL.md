@@ -217,6 +217,8 @@ scripts/speak.py --list-voices                     # Roger, Sarah, George, ... (
 scripts/speak.py --voice Roger "Hi everyone, Devin 2 here. The audio routing is done."
 scripts/listen.py --seconds 15                     # transcript of the meeting audio, "Devin" spelled right
 scripts/listen.py --seconds 15 --json              # words + speaker_id + timestamps
+scripts/listen.py --until-silence 2 --max 90       # block until someone talks and then stops for 2 s
+scripts/speak.py --if-quiet --voice Roger "..."    # wait a random 0.5-2 s gap; back off if someone starts
 ```
 
 - `speak.py` plays into the Zoom mic device (Linux `paplay --device=devin_mic`; macOS `afplay`, so system output
@@ -224,11 +226,20 @@ scripts/listen.py --seconds 15 --json              # words + speaker_id + timest
 - `listen.py` records the Zoom speaker device (Linux `zoom_out.monitor`; macOS `BlackHole 16ch` via ffmpeg,
   `brew install ffmpeg` first) and posts it to Scribe with `keyterms` for our names. Verified on Linux: TTS ->
   `zoom_out` -> `listen.py` round trip and a real Devin line from the meeting both came back word for word.
-- Zoom's *own* captions still write "Devon"/"Kevin": no custom vocabulary there. Accept it, or (future) push our
-  Scribe transcript into Zoom via the third-party closed-caption API token.
-- Turn-taking for a natural-sounding meeting: `listen.py` (or a streaming version) until ~1.5-2 s of silence, back
-  off a random 0.5-2 s if someone else starts, then `speak.py`. The trio test used a fixed stagger instead
-  (Devin n waits (n-1) x 25 s after the roster is complete) and had no overlap.
+- Zoom's *own* captions still write "Devon"/"Kevin": no custom vocabulary there. Accept it: the native captions
+  are the visible proof that real speech is reaching Zoom, our Scribe transcript is what a Devin reasons over.
+  (A "Devin Captioner" pushing text via the third-party caption token was tried and dropped: Zoom returned 200
+  but never rendered the captions in a host-less meeting, and it reads as an overlay rather than speech.)
+- Turn-taking, the way a human does it. Loop per Devin:
+  1. `text=$(scripts/listen.py --until-silence 2)` — returns the moment the current speaker has been quiet for
+     2 s (max 90 s; exits non-zero if nobody spoke). Read `text`, decide whether it was addressed to you and
+     what to say.
+  2. `scripts/speak.py --if-quiet "<reply>"` — synthesises first, then watches the line for a random 0.5-2 s;
+     if another Devin got in first it waits for them to finish and re-checks (`--max-wait 30`, then speaks anyway).
+  3. Back to 1. Occasional overlap when two Devins both jump in is realistic; don't engineer it away.
+  Verified on Linux with espeak into `zoom_out`: `--until-silence` returned 1.5 s after the line ended and
+  `--if-quiet` held a 4 s talker off then spoke 2 s later. Speech threshold `ZOOM_SPEECH_RMS` (default 300; Zoom
+  speech is ~1000-4000 RMS). The trio test predates this and used a fixed stagger (Devin n waits (n-1) x 25 s).
 
 ## Limits
 - Paid host account: no 40-min cap. Free account: 40-min cap on 3+ participant meetings even with no host present.
