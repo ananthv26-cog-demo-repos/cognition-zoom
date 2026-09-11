@@ -8,7 +8,7 @@ VMs) join it as named guests through Zoom's web client.
 
 | Path | Purpose |
 |------|---------|
-| `scripts/zoom_meeting.py` | Server-to-Server OAuth token + `POST /users/{host}/meetings`; prints `join_url` and a direct web-client URL. `--delete ID` cleans up. |
+| `scripts/zoom_meeting.py` | Server-to-Server OAuth token + `POST /users/{host}/meetings`; prints `join_url` and a direct web-client URL. `--end ID` ends it when the demo is over; `--list-live`, `--delete ID`. |
 | `scripts/join_zoom.sh` | Launches a plain Chrome (own profile, no automation flags) on a Zoom URL so the join is not blocked as a bot. |
 | `.agents/skills/zoom-meeting/SKILL.md` | Step-by-step skill Devin sessions in this repo auto-load: create, hand off, join, set audio devices. |
 | `docs/wispr-zoom-demo-feasibility.md` | Audio architecture for the Mac VMs (BlackHole, Wispr Flow, realtime voice). |
@@ -18,7 +18,9 @@ VMs) join it as named guests through Zoom's web client.
 Personal Devin secrets (owner: Ananth): `ZOOM_S2S_ACCOUNT_ID`, `ZOOM_S2S_CLIENT_ID`,
 `ZOOM_S2S_CLIENT_SECRET`, `ZOOM_HOST_EMAIL`. They belong to a Server-to-Server OAuth app
 on a paid personal Zoom account with `meeting:write:meeting:admin` and
-`meeting:read:meeting:admin` scopes. No Zoom accounts are needed for the joining Devins.
+`meeting:read:meeting:admin` scopes (create). `--end`, `--delete` and `--list-live` also need
+`meeting:update:status:admin`, `meeting:delete:meeting:admin` and
+`meeting:read:list_meetings:admin`. No Zoom accounts are needed for the joining Devins.
 
 ## Quick start
 

@@ -6,7 +6,13 @@ Env vars required:
 
 Usage:
   python3 zoom_meeting.py [--topic "Devin standup"] [--duration 60] [--json]
-  python3 zoom_meeting.py --delete MEETING_ID
+  python3 zoom_meeting.py --end MEETING_ID        # scope meeting:update:status:admin
+  python3 zoom_meeting.py --delete MEETING_ID     # scope meeting:delete:meeting:admin
+  python3 zoom_meeting.py --list-live             # scope meeting:read:list_meetings:admin
+
+Creating only needs meeting:write:meeting:admin. A join-before-host meeting stays
+"in progress" while anyone is connected and blocks other meetings on the host
+account, so the parent should --end it when the demo is over.
 """
 import argparse
 import base64
@@ -87,6 +93,25 @@ def delete_meeting(token: str, meeting_id: str) -> None:
     http("DELETE", f"{API}/meetings/{meeting_id}", {"Authorization": f"Bearer {token}"})
 
 
+def end_meeting(token: str, meeting_id: str) -> None:
+    http(
+        "PUT",
+        f"{API}/meetings/{meeting_id}/status",
+        {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json.dumps({"action": "end"}).encode(),
+    )
+
+
+def list_live_meetings(token: str) -> list[dict]:
+    host = urllib.parse.quote(env("ZOOM_HOST_EMAIL"), safe="")
+    data = http(
+        "GET",
+        f"{API}/users/{host}/meetings?type=live&page_size=300",
+        {"Authorization": f"Bearer {token}"},
+    )
+    return data.get("meetings", [])
+
+
 def summarize(m: dict) -> dict:
     mid = m["id"]
     pwd = m.get("encrypted_password", "")
@@ -106,10 +131,21 @@ def main() -> None:
     ap.add_argument("--topic", default="Devin standup")
     ap.add_argument("--duration", type=int, default=60)
     ap.add_argument("--json", action="store_true", help="print machine-readable JSON only")
-    ap.add_argument("--delete", metavar="MEETING_ID")
+    cmd = ap.add_mutually_exclusive_group()
+    cmd.add_argument("--delete", metavar="MEETING_ID")
+    cmd.add_argument("--end", metavar="MEETING_ID", help="end an in-progress meeting")
+    cmd.add_argument("--list-live", action="store_true", help="list in-progress meetings on the host")
     args = ap.parse_args()
 
     token = get_token()
+    if args.list_live:
+        live = [{"id": m["id"], "topic": m.get("topic"), "start_time": m.get("start_time")} for m in list_live_meetings(token)]
+        print(json.dumps(live) if args.json else "\n".join(f"{m['id']}: {m['topic']}" for m in live) or "no live meetings")
+        return
+    if args.end:
+        end_meeting(token, args.end)
+        print(f"ended meeting {args.end}")
+        return
     if args.delete:
         delete_meeting(token, args.delete)
         print(f"deleted meeting {args.delete}")
