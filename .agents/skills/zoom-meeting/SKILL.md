@@ -368,7 +368,10 @@ A prompt like "have 2 Mac VMs and 1 Windows VM join the same Zoom and chat with 
    2026-09-11 Windows child sat in provisioning for 30+ min and missed the whole meeting.
 4. **Recording:** nobody in the meeting is host so Zoom cloud recording is unavailable — instead designate one
    child (preferably a macOS VM) to record its screen with the built-in tools. Its prompt adds: after joining
-   and setting audio, maximize the meeting window and call `recording_start`; during the conversation call
+   and setting audio, make the screen presentable — **non-Wispr run:** the Zoom meeting window maximized with no
+   other app visible (green button > Fill/Zoom, `defaults write com.apple.dock autohide -bool true; killall Dock`);
+   **Wispr run:** the verified split of §7 — screenshot it and check it before recording, then `recording_start`;
+   during the conversation call
    `annotate_recording` — `setup` for join/audio config, `test_start` when its turn begins ("It should give
    the <persona> standup update"), `assertion` after each spoke/heard turn ("Mac VM 1's update appeared as
    captions"), and `recording_stop` (title + summary) right after leaving. The video is the demo evidence.
@@ -389,8 +392,18 @@ transcript, a diarised refined transcript and an AI summary; no bot joins Zoom. 
 
 Rules for a Wispr run (put them in the children's first prompt):
 - Zoom captions **off** (`More (…) > Hide captions` if on). The Wispr live transcript is the proof of speech.
-- Screen split: Zoom meeting window left half, Wispr "Meeting Recorder" (notepad/live transcript) right half —
-  `scripts/wispr_notetaker.sh layout`. The recorder child records this layout.
+- **Split screen is mandatory, and must be verified before anything is recorded or screenshotted for the user.**
+  Zoom meeting window = exactly the left half, Wispr "Meeting Recorder" (notepad/live transcript) = exactly the
+  right half, nothing else on screen: no Chrome, no Finder window, no Dock, no strip of wallpaper between or
+  under the two halves. Half-width windows floating over the desktop look unfinished and are not acceptable.
+  1. `scripts/wispr_notetaker.sh layout` — hides every other app, auto-hides the Dock, tiles both windows and
+     then *checks* their frames. It exits non-zero and prints which window is off.
+  2. If it fails: hover that window's **green button > Tile Window to Left/Right of Screen** (or drag-resize it),
+     then `scripts/wispr_notetaker.sh layout --verify` until it passes. Never continue on a failing check.
+  3. Take a screenshot and look at it: both halves flush to the screen edges and to each other, nothing visible
+     behind them. Only then `recording_start` / send a screenshot to the user.
+  Re-run `layout --verify` after anything that can move a window (leaving a panel open, a Wispr dialog, a
+  re-join). The recorder child records this layout.
 - Close the Zoom **participants panel** (⌘U, or its X) before `layout` and before `recording_start`, and keep it
   closed for the rest of the meeting. Docked, it widens the Zoom window over the right half and hides the Wispr
   live transcript for the whole recording (2026-09-11 run). Open it only for the roster screenshot, then ⌘U again.

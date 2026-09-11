@@ -9,7 +9,10 @@
 #   wispr_notetaker.sh devices          system output AND input -> BlackHole 2ch (Notetaker follows the default input)
 #   wispr_notetaker.sh authdb grant     back up + allow the authorization rights behind the Accessibility toggle
 #   wispr_notetaker.sh authdb restore   put them back (run right after the toggle is on)
-#   wispr_notetaker.sh layout           Zoom meeting window left half, Wispr "Meeting Recorder" right half
+#   wispr_notetaker.sh layout           clean split screen: hide every other app, auto-hide the Dock, Zoom meeting
+#                                       window exactly the left half, Wispr "Meeting Recorder" exactly the right
+#                                       half, then verify both frames. Non-zero exit = not presentable.
+#   wispr_notetaker.sh layout --verify  check the two frames only, change nothing
 #   wispr_notetaker.sh status           is Wispr running, which windows, which permissions look granted
 set -euo pipefail
 [ "$(uname -s)" = Darwin ] || { echo "macOS only" >&2; exit 1; }
@@ -97,34 +100,96 @@ cmd_authdb() {
   esac
 }
 
+# Anything that is not Zoom or Wispr has to be off screen: a Chrome window or a strip of wallpaper between the
+# two halves is what makes a recording look unfinished. Hiding is reversible and closes nothing.
+hide_others() {
+  osascript <<'EOF' >/dev/null 2>&1 || true
+tell application "System Events"
+  repeat with p in (every process whose visible is true and background only is false)
+    if name of p is not in {"zoom.us", "Wispr Flow", "Finder"} then
+      try
+        set visible of p to false
+      end try
+    end if
+  end repeat
+end tell
+EOF
+  # The Dock sits on top of the bottom of both tiles; auto-hide gives them the full height.
+  defaults write com.apple.dock autohide -bool true >/dev/null 2>&1 || true
+  killall Dock >/dev/null 2>&1 || true
+}
+
+# "x y w h" of a window, empty when the window is not there.
+win_frame() {
+  osascript - "$1" "$2" <<'EOF' 2>/dev/null
+on run argv
+  tell application "System Events" to tell process (item 1 of argv) to tell (first window whose name is (item 2 of argv))
+    set p to position
+    set s to size
+  end tell
+  return ((item 1 of p) as text) & " " & ((item 2 of p) as text) & " " & ((item 1 of s) as text) & " " & ((item 2 of s) as text)
+end run
+EOF
+}
+
+# Separate `set position` / `set size` statements: the combined `set {position, size}` form fails with -10003.
+# Applied twice: the first resize is clamped while the window is still laying out.
+set_frame() {
+  osascript - "$1" "$2" "$3" "$4" "$5" "$6" <<'EOF' >/dev/null 2>&1
+on run argv
+  set {pname, wname} to {item 1 of argv, item 2 of argv}
+  set {x, y, w, h} to {(item 3 of argv) as integer, (item 4 of argv) as integer, (item 5 of argv) as integer, (item 6 of argv) as integer}
+  tell application "System Events" to tell process pname to tell (first window whose name is wname)
+    repeat 2 times
+      set position to {x, y}
+      set size to {w, h}
+    end repeat
+  end tell
+end run
+EOF
+}
+
+# A tile off by more than this many pixels leaves a seam that is visible in screenshots and recordings.
+LAYOUT_TOLERANCE=${LAYOUT_TOLERANCE:-6}
+
+check_tile() {
+  local label=$1 pname=$2 wname=$3 x=$4 y=$5 w=$6 h=$7 frame d off=0
+  frame=$(win_frame "$pname" "$wname")
+  if [ -z "$frame" ]; then
+    echo "FAIL $label: no \"$wname\" window in $pname" >&2
+    return 1
+  fi
+  # shellcheck disable=SC2086
+  set -- $frame
+  for d in $(($1 - x)) $(($2 - y)) $(($3 - w)) $(($4 - h)); do
+    [ "${d#-}" -le "$LAYOUT_TOLERANCE" ] || off=1
+  done
+  if [ "$off" = 1 ]; then
+    echo "FAIL $label: at $1,$2 ${3}x${4}, expected $x,$y ${w}x${h}" >&2
+    return 1
+  fi
+  echo "ok $label: $1,$2 ${3}x${4}"
+}
+
 cmd_layout() {
-  # Separate `set position` / `set size` statements: the combined `set {position, size}` form fails with -10003.
-  local bounds w h half rc=0
+  local verify_only=0 bounds w h half top rc=0
+  [ "${1:-}" = --verify ] && verify_only=1
   bounds=$(osascript -e 'tell application "Finder" to get bounds of window of desktop')
   w=$(echo "$bounds" | awk -F', ' '{print $3}'); h=$(echo "$bounds" | awk -F', ' '{print $4}')
-  half=$((w / 2))
-  osascript - "$half" "$h" <<'EOF' || { echo "Zoom meeting window not positioned (is the meeting joined?)" >&2; rc=1; }
-on run argv
-  set half to (item 1 of argv) as integer
-  set h to (item 2 of argv) as integer
-  tell application "System Events" to tell process "zoom.us" to tell (first window whose name is "Zoom Meeting")
-    set position to {0, 25}
-    set size to {half, h - 25}
-  end tell
-end run
-EOF
-  osascript - "$half" "$h" <<'EOF' || { echo "Wispr 'Meeting Recorder' window not positioned (start a note first)" >&2; rc=1; }
-on run argv
-  set half to (item 1 of argv) as integer
-  set h to (item 2 of argv) as integer
-  tell application "System Events" to tell process "Wispr Flow" to tell (first window whose name is "Meeting Recorder")
-    set position to {half, 25}
-    set size to {half, h - 25}
-  end tell
-end run
-EOF
-  [ "$rc" = 0 ] && echo "layout: Zoom left, Wispr right (${w}x${h})"
-  return "$rc"
+  half=$((w / 2)); top=25  # menu bar
+  if [ "$verify_only" = 0 ]; then
+    hide_others
+    set_frame "zoom.us" "Zoom Meeting" 0 "$top" "$half" $((h - top))
+    set_frame "Wispr Flow" "Meeting Recorder" "$half" "$top" "$half" $((h - top))
+  fi
+  check_tile "zoom (left half)" "zoom.us" "Zoom Meeting" 0 "$top" "$half" $((h - top)) || rc=1
+  check_tile "wispr (right half)" "Wispr Flow" "Meeting Recorder" "$half" "$top" "$half" $((h - top)) || rc=1
+  if [ "$rc" != 0 ]; then
+    echo "split screen is NOT clean (screen ${w}x${h}) - do not record yet. Fix the offending window by hand:" >&2
+    echo "hover its green button > Tile Window to Left/Right of Screen (or drag-resize), then: $0 layout --verify" >&2
+    return 1
+  fi
+  echo "layout: clean split, Zoom left / Wispr right (screen ${w}x${h}) - now screenshot to confirm nothing shows behind"
 }
 
 cmd_status() {
@@ -141,7 +206,7 @@ case "${1:-}" in
   launch) cmd_launch ;;
   devices) cmd_devices ;;
   authdb) shift; cmd_authdb "$@" ;;
-  layout) cmd_layout ;;
+  layout) shift; cmd_layout "$@" ;;
   status) cmd_status ;;
-  *) sed -n '2,13p' "$0" >&2; exit 2 ;;
+  *) sed -n '2,16p' "$0" >&2; exit 2 ;;
 esac

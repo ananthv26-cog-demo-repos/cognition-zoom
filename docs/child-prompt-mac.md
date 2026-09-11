@@ -24,7 +24,16 @@ You:
 - Voice: `--voice {{Roger | Sarah}}`
 - Others in the meeting: {{"Mac VM 2 (frontend), Windows VM (QA)"}}
 - {{You open the conversation once every name above is in the participant list. | You do not open; you speak when addressed (converse.py answers PASS otherwise).}}
-- {{You are the recorder: non-Wispr run — maximize the Zoom window; Wispr run — apply the split layout and do NOT maximize Zoom (that covers the transcript). Then `recording_start` before the conversation and `recording_stop` after leaving. | Take screenshots only; another VM records.}}
+- {{You are the recorder: `recording_start` before the conversation and `recording_stop` after leaving. | Take screenshots only; another VM records.}}
+
+SCREEN (hard requirement — applies to every screenshot you send and to the recording):
+- Nothing but the meeting may be on screen: no Chrome, no Finder window, no Dock, no wallpaper showing
+  between or beside the windows. Auto-hide the Dock once: `defaults write com.apple.dock autohide -bool true; killall Dock`.
+- {{Non-Wispr run: the Zoom meeting window maximized (hover the green button > Fill / Zoom), nothing else visible. | Wispr run: clean split screen — Zoom meeting window on the exact left half, Wispr "Meeting Recorder" on the exact right half, flush to the screen edges and to each other. Do NOT maximize Zoom (it covers the transcript).}}
+- {{ | Run `scripts/wispr_notetaker.sh layout`: it hides the other apps, tiles both windows and verifies the frames. If it exits non-zero it names the window that is off — hover that window's green button > **Tile Window to Left/Right of Screen** (or drag-resize it) and re-run `scripts/wispr_notetaker.sh layout --verify` until it passes.}}
+- Then take a screenshot and *look* at it before continuing. If a window is short, offset, or something shows
+  behind it, fix it and screenshot again. Never start the recording, and never send the user a screenshot,
+  while the screen is not clean. Re-check after anything that moves a window (a panel, a dialog, a re-join).
 
 Preflight (report and stop if any fails; do not join half-configured):
 1. `python3 scripts/converse.py --name "{{name}}" --voice {{voice}} --check` (keys, voice, one model call, ~2 s).
@@ -62,8 +71,9 @@ WISPR (only because the parent prompt says "wispr"; both Mac VMs do this, before
   the line appears in the live transcript in ~5 s. Stop the note (green Stop, two clicks; "Keep").
 - After joining Zoom (captions OFF): **Notetaker > Start new note** from the menu bar (do not click toast
   buttons; they fall through), then close the Zoom participants panel (⌘U) and run
-  `scripts/wispr_notetaker.sh layout` (Zoom left, Meeting Recorder right). Keep the participants panel closed for
-  the rest of the meeting: docked, it hides Wispr's live transcript in every screenshot and in the recording.
+  `scripts/wispr_notetaker.sh layout`, then verify the split per SCREEN above before recording anything. Keep the
+  participants panel closed for the rest of the meeting: docked, it widens Zoom over the right half and hides
+  Wispr's live transcript in every screenshot and in the recording.
 - After the conversation: Stop the note, wait for the Summary (~20 s) and the refined transcript (~1 min), copy
   each (copy icon) to `~/wispr_transcript.txt` / `~/wispr_summary.txt` via `pbpaste`, attach both. Expect your
   own TTS lines to be labelled "Them" live; that is known and not to be debugged. Report what the refined
