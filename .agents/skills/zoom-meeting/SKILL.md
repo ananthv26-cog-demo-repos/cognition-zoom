@@ -175,7 +175,8 @@ if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -Error
     Start-Process -Wait $HOME\hificable\HiFiCableAsioBridgeSetup.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\hificable  # 1.5 s
   } finally { if ($addedTrust -and (Test-Path $trust)) { Remove-Item $trust } }   # trust only needed for the install; keep it if it was already there
 }
-Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio*' | Format-Table Status, FriendlyName   # both must be OK; a faulted one: pnputil /remove-device <InstanceId>, then re-run
+$bad = @(Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio*' | Where-Object Status -ne 'OK')
+if ($bad -or @(Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio*').Count -lt 2) { throw "cables not healthy: $($bad.FriendlyName -join ', ') -> pnputil /remove-device <InstanceId>, then re-run" }
 curl.exe -sL -o $HOME\Zoom-x64.msi "https://zoom.us/client/latest/ZoomInstallerFull.msi?archType=x64"   # 212 MB; unsuffixed = 32-bit
 Start-Process -Wait msiexec -ArgumentList '/i',"$HOME\Zoom-x64.msi",'/qn','/norestart'          # 20 s -> C:\Program Files\Zoom\bin\Zoom.exe
 
