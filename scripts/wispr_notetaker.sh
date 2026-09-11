@@ -11,8 +11,8 @@
 #   wispr_notetaker.sh authdb restore   put them back (run right after the toggle is on)
 #   wispr_notetaker.sh layout           clean split screen: hide every other app, auto-hide the Dock, Zoom meeting
 #                                       window exactly the left half, Wispr "Meeting Recorder" exactly the right
-#                                       half, then verify both frames. Non-zero exit = not presentable.
-#   wispr_notetaker.sh layout --verify  check the two frames only, change nothing
+#                                       half, then verify. Non-zero exit = not presentable.
+#   wispr_notetaker.sh layout --verify  check only (frames, edges, Dock setting, stray windows), change nothing
 #   wispr_notetaker.sh status           is Wispr running, which windows, which permissions look granted
 set -euo pipefail
 [ "$(uname -s)" = Darwin ] || { echo "macOS only" >&2; exit 1; }
@@ -153,7 +153,9 @@ EOF
 # two windows each a few px off in opposite directions add up to a gap twice this wide.
 MAX_GAP=${MAX_GAP:-2}
 
-# "process | window" for every window of every visible app.
+# "process | window" for every window of every visible app, minimized windows left out (they are in the Dock,
+# not on the screen). A process whose windows cannot be read is reported instead of skipped: that is exactly the
+# case where an app refused to hide and is still covering the screen.
 visible_windows() {
   osascript <<'EOF' 2>/dev/null
 tell application "System Events"
@@ -162,8 +164,16 @@ tell application "System Events"
     set pn to name of p
     try
       repeat with wdw in (every window of p)
-        set out to out & pn & " | " & (name of wdw) & linefeed
+        try
+          if value of attribute "AXMinimized" of wdw is not true then
+            set out to out & pn & " | " & (name of wdw) & linefeed
+          end if
+        on error
+          set out to out & pn & " | (window state unreadable)" & linefeed
+        end try
       end repeat
+    on error
+      set out to out & pn & " | (windows unreadable)" & linefeed
     end try
   end repeat
 end tell
@@ -182,7 +192,7 @@ edge_ok() {
 # Everything a viewer can see is checked here: the two frames, the edges they must be flush with, the Dock and
 # any window that survived hide_others.
 verify_split() {
-  local w=$1 h=$2 top=$3 rc=0 zf wf zx zy zw zh wx wy ww wh strays
+  local w=$1 h=$2 top=$3 rc=0 zf wf zx zy zw zh wx wy ww wh windows strays
   zf=$(win_frame "zoom.us" "Zoom Meeting")
   wf=$(win_frame "Wispr Flow" "Meeting Recorder")
   [ -n "$zf" ] || { echo "FAIL no \"Zoom Meeting\" window (is the meeting joined?)" >&2; rc=1; }
@@ -202,7 +212,12 @@ verify_split() {
     echo "FAIL Dock is not auto-hidden (it covers the bottom of both halves)" >&2; rc=1
   fi
   # hide_others suppresses its own failures (an app may refuse to hide); this is where that shows up.
-  strays=$(visible_windows | grep -v '^zoom\.us | Zoom Meeting$' | grep -v '^Wispr Flow | Meeting Recorder$' \
+  windows=$(visible_windows)
+  if [ -z "$windows" ]; then
+    echo "FAIL could not enumerate windows (System Events / Accessibility?) - cannot certify the screen" >&2
+    rc=1
+  fi
+  strays=$(echo "$windows" | grep -v '^zoom\.us | Zoom Meeting$' | grep -v '^Wispr Flow | Meeting Recorder$' \
     | grep -v '^Finder | $' | grep -v '^$' || true)
   if [ -n "$strays" ]; then
     echo "FAIL other windows are on screen - close or hide them:" >&2
