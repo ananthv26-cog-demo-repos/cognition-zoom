@@ -452,8 +452,9 @@ Speaker attribution — what to expect and claim:
   virtual keyboard), "Stop Notetaker when a call ends" on.
 
 Order of operations for a Wispr child: `install` -> `devices` -> `launch` + sign-in + permissions -> test note ->
-join Zoom (§2; mic BlackHole 2ch, speaker BlackHole 16ch, captions off) -> start note -> `layout` -> recorder starts
-recording -> `converse.py` (§5) -> stop note, export -> leave (don't end) -> attach transcript, summary, recording.
+join Zoom (§2; mic BlackHole 2ch, speaker BlackHole 16ch, captions off) -> start note -> close the participants
+panel -> `layout` -> recorder starts recording (do not maximize Zoom on a Wispr run; that hides the transcript) ->
+`converse.py` (§5) -> stop note, export -> leave (don't end) -> attach transcript, summary, recording.
 
 ## Limits
 - Paid host account: no 40-min cap. Free account: 40-min cap on 3+ participant meetings even with no host present.

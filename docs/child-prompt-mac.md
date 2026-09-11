@@ -24,7 +24,7 @@ You:
 - Voice: `--voice {{Roger | Sarah}}`
 - Others in the meeting: {{"Mac VM 2 (frontend), Windows VM (QA)"}}
 - {{You open the conversation once every name above is in the participant list. | You do not open; you speak when addressed (converse.py answers PASS otherwise).}}
-- {{You are the recorder: maximize the Zoom window (Wispr run: apply the split layout first), `recording_start` before the conversation, `recording_stop` after leaving. | Take screenshots only; another VM records.}}
+- {{You are the recorder: non-Wispr run — maximize the Zoom window; Wispr run — apply the split layout and do NOT maximize Zoom (that covers the transcript). Then `recording_start` before the conversation and `recording_stop` after leaving. | Take screenshots only; another VM records.}}
 
 Preflight (report and stop if any fails; do not join half-configured):
 1. `python3 scripts/converse.py --name "{{name}}" --voice {{voice}} --check` (keys, voice, one model call, ~2 s).
@@ -43,9 +43,9 @@ Conversation (section 5; one process, nothing scripted, you steer it):
 6. `python3 scripts/converse.py --name "{{name}}" --voice {{voice}} --persona ~/persona.md --roster "{{others}}" --steer ~/steer.txt --log ~/turns.jsonl --max-minutes 10 {{--open "Hi everyone, {{name}} here. Quick standup: Mac VM 2, what are you working on?" | (no --open)}}`
    in its own shell with a 12-min timeout. While it runs: `tail -f ~/turns.jsonl`; append lines to ~/steer.txt to
    steer ("ask Windows VM about the release"); append `STOP` to take over with listen.py/speak.py. Screenshot the
-   participant list with every name (⌘U to open it, ⌘U again to close it right after — leaving it docked covers
-   the right half of the screen), and {{the captions panel | Wispr's live transcript}} showing your line and
-   another Devin's line.
+   participant list with every name (open it with Participants/⌘U only if it is closed, then close it again with
+   its X or ⌘U — leaving it docked covers the right half of the screen), and {{the captions panel | Wispr's live
+   transcript}} showing your line and another Devin's line.
 7. Leave (**Leave > Leave meeting**, then `pkill -x zoom.us`). Do NOT end the meeting for everyone.
 
 WISPR (only because the parent prompt says "wispr"; both Mac VMs do this, before step 3):
