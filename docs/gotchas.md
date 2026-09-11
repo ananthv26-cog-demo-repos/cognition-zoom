@@ -50,11 +50,12 @@ script that implements it is named so nobody has to rediscover it.
   the spelling right; it also post-fixes Devon/Devan/Kevin -> Devin before a digit.
 - [all] **Robotic `say` / `espeak-ng` voices.** `scripts/speak.py` uses ElevenLabs (`eleven_turbo_v2_5`, voice
   names like `Roger`, `Sarah`; `--list-voices`) and writes the returned PCM as a wav so it plays through the same
-  `paplay --device=devin_mic` / `afplay` path. Without `ELEVENLABS_API_KEY` it falls back to the OS voice, so a
-  demo never goes silent.
+  `paplay --device=devin_mic` / `afplay` / Windows `System.Media.SoundPlayer` path. Without `ELEVENLABS_API_KEY`
+  it falls back to the OS voice, so a demo never goes silent.
 - [all] **Hearing the meeting.** The Zoom *speaker* device is the capture point: Linux `parecord
   --device=zoom_out.monitor` (Zoom VoiceEngine plays into `zoom_out`), macOS `ffmpeg -f avfoundation -i
-  ":BlackHole 16ch"` (ffmpeg is not preinstalled; `brew install ffmpeg`). `listen.py --seconds N` wraps this.
+  ":BlackHole 16ch"` (ffmpeg is not preinstalled; `brew install ffmpeg`), Windows `ffmpeg -f dshow -i
+  audio="Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)"` (ffmpeg preinstalled). `listen.py --seconds N` wraps this.
 - [all] **Third-party captions (closed-caption API token) don't render in a host-less meeting.** Tried it:
   `GET /meetings/{id}/token?type=closed_caption_token` needs scope `meeting:read:token:admin` plus the account
   settings "Manual captions" + "Allow use of caption API Token"; POSTs to the returned URL with `seq=N&lang=en-US`
@@ -66,7 +67,10 @@ script that implements it is named so nobody has to rediscover it.
   (Zoom keeps the sink awake while connected).
 - [all] **Turn-taking.** `listen.py --until-silence 2` (return when the current speaker has paused 2 s) then
   `speak.py --if-quiet` (random 0.5-2 s check, wait out anyone who started first). RMS threshold
-  `ZOOM_SPEECH_RMS=300`; Zoom's decoded speech sits around 1000-4000, silence on the null sink is 0.
+  `ZOOM_SPEECH_RMS=300`; Zoom's decoded speech sits around 1000-4000 (Windows Hi-Fi Cable: 1000-3000), silence on
+  the null sink / cable is 0-1.
+- [all] **Closing the recorder raced the reader thread** (`ValueError: PyMemoryView_FromBuffer` from `_pump` on
+  Windows). `Capture.__exit__` now joins the reader before closing the pipe on every platform.
 - [all] **ElevenLabs voice names carry a description** (`"Roger - Laid-Back, Casual, Resonant"`); match on the part
   before ` - `. `speak.py --voice` accepts either the short name or a voice_id.
 
@@ -146,12 +150,22 @@ script that implements it is named so nobody has to rediscover it.
   `HK{LM,CU}:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone` and
   `HKCU:...\microphone\NonPackaged` (blueprint does), or Settings > Privacy > Microphone > "Allow desktop apps".
 - [win] **Routing TTS into Zoom.** `Set-AudioDevice` (AudioDeviceCmdlets) the *system* output to `CABLE Input`;
-  `Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("...")`
-  then plays into the cable and Zoom's mic level meter moves with mic = `CABLE Output`. Voices on the VM:
-  `Microsoft David Desktop`, `Microsoft Zira Desktop`.
-- [win] **Meeting audio would loop back into the mic.** Same as mac/linux: with system output on `CABLE Input`,
-  Zoom speaker = "Same as System" feeds the meeting into the mic. Pick speaker = `Hi-Fi Cable Input` (the second,
-  independent cable installed by the blueprint), microphone = `CABLE Output`. Zoom remembers it ("Custom combination").
+  `speak.py` then plays its ElevenLabs wav there with `(New-Object System.Media.SoundPlayer $wav).PlaySync()` and
+  Zoom's mic level meter moves with mic = `CABLE Output` (captions: "Hello from Devon Windows. This is the
+  ElevenLabs voiced through the virtual cable"). Fallback voice: `System.Speech` (`Microsoft David/Zira Desktop`).
+- [win] **Zoom defaults its speaker to `CABLE Input`, i.e. its own mic feed.** With system output on `CABLE Input`,
+  Zoom's preview picks that (or "Same as System") as the speaker and the meeting would loop back into the mic.
+  Always pick speaker = `Hi-Fi Cable Input` (the second, independent cable installed by the blueprint) from the
+  preview's Audio ^ menu, microphone = `CABLE Output`. Zoom remembers it ("Custom combination").
+- [win] **`ffmpeg` on PATH is a chocolatey shim.** `C:\ProgramData\chocolatey\bin\ffmpeg.exe` spawns the real
+  `lib\ffmpeg\tools\ffmpeg\bin\ffmpeg.exe`, so `Popen.kill()` only kills the shim: the recorder kept writing until
+  the pipe closed under it ("Error submitting a packet to the muxer" spam, 2-4 s stall per capture). `listen.py`
+  uses `taskkill /T /F /PID` on Windows. `python` 3.12 (`C:\devin\python`, no `py` launcher) and ffmpeg 8 are
+  preinstalled on the Devin Windows image; the blueprint only installs ffmpeg if `Get-Command ffmpeg` fails.
+- [win] **dshow device names are exact strings.** `ffmpeg -list_devices true -f dshow -i dummy` prints
+  `"Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)"` and `"CABLE Output (VB-Audio Virtual Cable)"`; a substring
+  (`Hi-Fi`) fails with "Could not find audio only device". `listen.py` defaults to the full name
+  (`ZOOM_OUT_DSHOW` overrides); `-audio_buffer_size 100` brings the first frame in after ~0.45 s.
 - [win] **Both `zoommtg://` and the Edge web client say "The host has another meeting in progress".** Not a Windows
   problem: another Devin's meeting on the same host account was live (`--list-live` showed it). Zoom desktop keeps
   retrying by itself and joined ~25 min later when that meeting ended (see the [api] entry above).
