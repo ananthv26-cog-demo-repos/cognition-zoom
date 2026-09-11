@@ -120,9 +120,15 @@ initialize:
       if (-not (Test-Path $zoom)) { throw 'Zoom.exe missing after install' }
   - name: ffmpeg for listen.py (dshow capture of Hi-Fi Cable Output); python 3.12 and ffmpeg ship with the Devin Windows image
     run: |
-      if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install -y ffmpeg }
+      if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+        choco install -y ffmpeg
+        if ($LASTEXITCODE -ne 0) { throw "choco install ffmpeg exit $LASTEXITCODE" }
+      }
+      if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { throw 'ffmpeg missing after install' }
       ffmpeg -version | Select-Object -First 1
+      if ($LASTEXITCODE -ne 0) { throw "ffmpeg -version exit $LASTEXITCODE" }
       python --version
+      if ($LASTEXITCODE -ne 0) { throw "python exit $LASTEXITCODE" }
 knowledge:
   - name: audio devices
     contents: |
