@@ -295,8 +295,14 @@ A prompt like "have 2 Mac VMs and 1 Windows VM join the same Zoom and chat with 
    Tell exactly one child to open the conversation once all names are in the roster; the others speak only when
    addressed or when a listen cycle comes back empty. Ask for screenshots of the participant list and the
    captions panel (own line + another Devin's line), a `(heard, said)` log, and "leave, don't end".
-4. Optionally join from the parent VM as `Parent` (Linux §3) to screenshot the roster/captions yourself.
-5. When the children report, `python3 scripts/zoom_meeting.py --end <id>` and confirm with `--list-live`.
+4. **Recording:** nobody in the meeting is host so Zoom cloud recording is unavailable — instead designate one
+   child (preferably a macOS VM) to record its screen with the built-in tools. Its prompt adds: after joining
+   and setting audio, maximize the meeting window and call `recording_start`; during the conversation call
+   `annotate_recording` — `setup` for join/audio config, `test_start` when its turn begins ("It should give
+   the <persona> standup update"), `assertion` after each spoke/heard turn ("Mac 1's update appeared as
+   captions"), and `recording_stop` (title + summary) right after leaving. The video is the demo evidence.
+5. Optionally join from the parent VM as `Parent` (Linux §3) to screenshot the roster/captions yourself.
+6. When the children report, `python3 scripts/zoom_meeting.py --end <id>` and confirm with `--list-live`.
 
 Timing seen so far: children take 1-3 min to be in the meeting (snapshot with Zoom preinstalled; ~60 s more
 if the blueprint has to run by hand), a listen/speak turn is 5-15 s, a 6-8 turn conversation is ~8 min.
