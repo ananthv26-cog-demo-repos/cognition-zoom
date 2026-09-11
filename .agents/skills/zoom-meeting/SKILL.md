@@ -1,6 +1,6 @@
 ---
 name: zoom-meeting
-description: Create a host-less Zoom meeting via the Zoom REST API (Server-to-Server OAuth) and join it from a Devin VM as a named guest through the Zoom desktop app (macOS + BlackHole, Linux + PulseAudio null sinks; plain Chrome web client as fallback). Use for multi-Devin Zoom demos (parent creates the meeting, children join with display names/personas and virtual-audio mics).
+description: Create a host-less Zoom meeting via the Zoom REST API (Server-to-Server OAuth) and join it from a Devin VM as a named guest through the Zoom desktop app (macOS + BlackHole, Linux + PulseAudio null sinks, Windows + VB-Audio cables; plain Chrome/Edge web client as fallback). Use for multi-Devin Zoom demos (parent creates the meeting, children join with display names/personas and virtual-audio mics).
 ---
 
 # Zoom meeting: create + join from a Devin VM
@@ -141,6 +141,67 @@ Gotchas:
 web client rejects it with "Automated bots aren't allowed to join this meeting" (reCAPTCHA). The plain Chrome
 instance the script launches (own profile) joins fine. Then: type the display name in **Your Name**, **Join**,
 dismiss the "Cannot detect your camera" banner, **Allow** Chrome's mic prompt. Not re-tested with the null sinks.
+
+## 4. Join from a Windows VM (child session) — verified 2026-09-11, Windows Server 2022 x64 Devin VM
+
+Preferred path: **Zoom desktop app** (guest, no sign-in) with two VB-Audio virtual cables as the BlackHole
+equivalent: **VB-CABLE** carries TTS into the Zoom mic, **Hi-Fi Cable** is the Zoom speaker (distinct device, so
+"Same as System" can never loop meeting audio back into the mic). All PowerShell; the shell is already elevated.
+Verified end to end: guest join with display name, device pickers, Windows TTS moving the mic meter and
+**live captions transcribing it**. The Edge web client is bot-blocked on this VM, so the desktop app is the only path.
+
+```powershell
+# one-time setup (all in the runs-on: windows blueprint doc; ~20 s total, NO reboot needed)
+Set-Service AudioEndpointBuilder -StartupType Automatic; Start-Service AudioEndpointBuilder   # VM boots with audio
+Set-Service Audiosrv -StartupType Automatic; Start-Service Audiosrv                           # services disabled
+Install-Module AudioDeviceCmdlets -Force -Scope CurrentUser                                   # Get-/Set-AudioDevice
+curl.exe -sL -o $HOME\VBCABLE_Driver_Pack45.zip https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
+Expand-Archive -Force $HOME\VBCABLE_Driver_Pack45.zip $HOME\vbcable45
+Start-Process -Wait $HOME\vbcable45\VBCABLE_Setup_x64.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\vbcable45   # 1-9 s
+certutil -addstore -f TrustedPublisher scripts\windows\vb-audio-driver-signer.cer             # else a driver-trust dialog
+curl.exe -sL -o $HOME\HiFiCable.zip https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip
+Expand-Archive -Force $HOME\HiFiCable.zip $HOME\hificable
+Start-Process -Wait $HOME\hificable\HiFiCableAsioBridgeSetup.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\hificable  # 1.5 s; -i on an installed one REMOVES it
+curl.exe -sL -o $HOME\Zoom-x64.msi "https://zoom.us/client/latest/ZoomInstallerFull.msi?archType=x64"   # 212 MB; unsuffixed = 32-bit
+Start-Process -Wait msiexec -ArgumentList '/i',"$HOME\Zoom-x64.msi",'/qn','/norestart'          # 20 s -> C:\Program Files\Zoom\bin\Zoom.exe
+
+# per session: system output -> CABLE Input (= Zoom mic feed), system input -> CABLE Output
+Import-Module AudioDeviceCmdlets
+Get-AudioDevice -List | Format-Table Type, Name, Default   # expect CABLE Input, CABLE In 16ch, Hi-Fi Cable Input / CABLE Output, Hi-Fi Cable Output
+Set-AudioDevice -ID (Get-AudioDevice -List | Where-Object { $_.Type -eq 'Playback'  -and $_.Name -like 'CABLE Input*'  }).ID
+Set-AudioDevice -ID (Get-AudioDevice -List | Where-Object { $_.Type -eq 'Recording' -and $_.Name -like 'CABLE Output*' }).ID
+
+# per meeting (no join_zoom.sh on Windows; the deep link is the whole script)
+Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Devin%20Win"
+```
+
+Then with computer use:
+1. Preview window "Windows spike" shows the pre-filled name and "No camera connected"; click **Join**. If it says
+   "Allow Zoom Workplace to access your microphone", desktop-app mic privacy is off: the blueprint sets
+   `ConsentStore\microphone` = `Allow` (HKLM + HKCU + `NonPackaged`), or toggle it in Settings > Privacy > Microphone.
+2. **Audio ^ > Audio Settings** (works from the preview too): speaker list `CABLE Input`, `CABLE In 16ch`,
+   `Hi-Fi Cable Input`, `Same as System`; microphone list `CABLE Output`, `Hi-Fi Cable Output`, `Same as System`.
+   Pick **speaker = Hi-Fi Cable Input, microphone = CABLE Output**; Zoom remembers it ("Custom combination").
+3. Speak: `Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("Hello from Devin Windows, testing captions")`
+   (voices: Microsoft David/Zira Desktop; `SetOutputToDefaultAudioDevice()` is the default, i.e. CABLE Input).
+   The **Input Level** meter in Audio Settings lights up green for the phrase. **More (…) > Show captions**
+   transcribes it (verified: "Hello from Devon Windows, testing captions This is Devin Wynne speaking through the
+   virtual cable"; David/Zira mishear names a bit, like espeak on Linux).
+4. Zoom's own output lands on `Hi-Fi Cable Input`; record it from `Hi-Fi Cable Output` if STT of the meeting is needed.
+5. Leave: **Leave > Leave meeting**, then `Get-Process Zoom* | Stop-Process -Force`.
+
+Gotchas (details in `docs/gotchas.md`, tag `[win]`):
+- No `winget` on Server 2022; `choco install vb-cable` (pack 43) installs but enumerates nothing — use pack 45.
+- Both Zoom drivers enumerate immediately, **no reboot** at any step.
+- `HiFiCableAsioBridgeSetup.exe -i` is a toggle: guard it with `Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable'`.
+- Zoom desktop keeps retrying "The host has another meeting in progress" by itself and joins as soon as the other
+  meeting ends (it did after ~25 min here); `--list-live` from a shell with the secrets tells you which meeting blocks.
+
+### Web client comparison on Windows (`Start-Process msedge "https://app.zoom.us/wc/join/<id>?pwd=<enc>"`)
+Does **not** work as a join path: the preview loads (after Edge's one-time welcome wizard and a
+`ConsentStore\webcam` = `Allow` so Edge may ask for camera+mic) and its device picker lists all four VB-Audio
+endpoints, but **Join** returns "Automated bots aren't allowed to join this meeting" (reCAPTCHA) even in plain,
+non-automated Edge — unlike plain Chrome on Linux/macOS. Use the desktop app.
 
 ## Limits
 - Paid host account: no 40-min cap. Free account: 40-min cap on 3+ participant meetings even with no host present.
