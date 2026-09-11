@@ -30,7 +30,8 @@
 #   Desktop mode does not return until the meeting window is on screen (Zoom can
 #   take ~45 s to map it, and screenshots taken before that show the old desktop);
 #   ZOOM_WINDOW_WAIT caps that wait. Windows Zoom already had before the deep
-#   link (a previous meeting still open) do not count as the new one.
+#   link (a previous meeting still open) do not count as the new one; if they
+#   cannot be enumerated the deep link is not fired at all.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,6 +54,11 @@ deep_link() {
   deep="zoommtg://zoom.us/join?confno=${id}${pwd_:+&pwd=$pwd_}"
   [ -n "$NAME" ] && deep="$deep&uname=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$NAME")"
   echo "$deep"
+}
+
+snapshot_windows() {
+  "$HERE/show_meeting_window.sh" --snapshot ||
+    { echo "cannot enumerate Zoom's windows; not firing the deep link without that baseline" >&2; exit 1; }
 }
 
 launch_chrome() {
@@ -81,7 +87,7 @@ case "$(uname -s)" in
     case "$MODE" in
       desktop)
         DEEP="$(deep_link)"
-        PRIOR="$("$HERE/show_meeting_window.sh" --snapshot)"
+        PRIOR="$(snapshot_windows)"
         open "$DEEP"
         echo "opened zoom.us.app -> $DEEP"
         ZOOM_NO_REFIRE=1 ZOOM_PRIOR_WINDOWS="$PRIOR" "$HERE/show_meeting_window.sh" "$URL" "" "$NAME"
@@ -107,7 +113,7 @@ case "$(uname -s)" in
         [ -x /usr/bin/zoom ] || { echo "zoom binary not found: /usr/bin/zoom (sudo apt-get install -y ./zoom_amd64.deb)" >&2; exit 1; }
         "$HERE/linux_audio.sh" >/dev/null || echo "linux_audio.sh failed; Zoom will report no microphone" >&2
         DEEP="$(deep_link)"
-        PRIOR="$("$HERE/show_meeting_window.sh" --snapshot)"
+        PRIOR="$(snapshot_windows)"
         nohup /usr/bin/zoom "$DEEP" >"$HOME/zoom-desktop.log" 2>&1 &
         echo "launched zoom pid $! -> $DEEP"
         ZOOM_NO_REFIRE=1 ZOOM_PRIOR_WINDOWS="$PRIOR" "$HERE/show_meeting_window.sh" "$URL" "" "$NAME"
