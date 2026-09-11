@@ -75,7 +75,10 @@ Then with computer use:
 2. **Audio ^ > Select a microphone**: `Same as system (BlackHole 2ch)`, `BlackHole 2ch`, `BlackHole 16ch`;
    **Select a speaker**: same three. Pick mic = BlackHole 2ch, speaker = BlackHole 16ch (Zoom remembers it as
    "Custom combination" on the next join).
-3. Speak: `say "Hello from Devin one"` while the system default output is BlackHole 2ch.
+3. Speak: `say -a "BlackHole 2ch" "Hello from Devin one"` (name the device: on 2 of 3 trio VMs plain `say`
+   was not heard even with system output on BlackHole 2ch), or `scripts/speak.py "..."` for an ElevenLabs voice.
+   The first audio triggers the TCC mic prompt for devin-remote: **Allow**. Re-check the speaker in Audio ^: Zoom
+   defaulted it to BlackHole 2ch (the mic) on two VMs; it must be 16ch.
    **More (…) > Show captions** turns on live captions without host involvement and transcribes the `say` text
    (verified: "Hello from Devon1, Testing Captions").
 4. Leave: hover the window, **Leave > Leave meeting**, then `pkill -x zoom.us`.
@@ -126,7 +129,8 @@ Then with computer use (`DISPLAY=:0`; `wmctrl -a "<topic>"` brings the preview w
    (any TTS that writes a WAV works; espeak-ng is robotic and captions mishear names).
    **More (…) > Show captions** turns on live captions without host involvement and transcribes it
    (verified: "Hello from Bevin on Linux. This is a quick roundbox...", "Testing Popley Pot" for "Testing paplay path").
-4. Zoom's own output goes to `zoom_out`; capture it with `parecord --device=zoom_out.monitor out.wav` (for Wispr Flow / STT).
+4. Zoom's own output goes to `zoom_out`; capture it with `parecord --device=zoom_out.monitor out.wav`, or
+   `scripts/listen.py --seconds 15` to get an ElevenLabs Scribe transcript of what the meeting said.
 5. Leave: **Leave > Leave meeting**, then `pkill -f /opt/zoom/zoom`.
 
 Gotchas:
@@ -202,6 +206,25 @@ Does **not** work as a join path: the preview loads (after Edge's one-time welco
 `ConsentStore\webcam` = `Allow` so Edge may ask for camera+mic) and its device picker lists all four VB-Audio
 endpoints, but **Join** returns "Automated bots aren't allowed to join this meeting" (reCAPTCHA) even in plain,
 non-automated Edge — unlike plain Chrome on Linux/macOS. Use the desktop app.
+## 5. Talking like a person (ElevenLabs, `ELEVENLABS_API_KEY`)
+
+```bash
+scripts/speak.py --list-voices                     # Roger, Sarah, George, ... (pick one per Devin persona)
+scripts/speak.py --voice Roger "Hi everyone, Devin 2 here. The audio routing is done."
+scripts/listen.py --seconds 15                     # transcript of the meeting audio, "Devin" spelled right
+scripts/listen.py --seconds 15 --json              # words + speaker_id + timestamps
+```
+
+- `speak.py` plays into the Zoom mic device (Linux `paplay --device=devin_mic`; macOS `afplay`, so system output
+  must be BlackHole 2ch). No key -> falls back to `say -a "BlackHole 2ch"` / `PULSE_SINK=devin_mic espeak-ng`.
+- `listen.py` records the Zoom speaker device (Linux `zoom_out.monitor`; macOS `BlackHole 16ch` via ffmpeg,
+  `brew install ffmpeg` first) and posts it to Scribe with `keyterms` for our names. Verified on Linux: TTS ->
+  `zoom_out` -> `listen.py` round trip and a real Devin line from the meeting both came back word for word.
+- Zoom's *own* captions still write "Devon"/"Kevin": no custom vocabulary there. Accept it, or (future) push our
+  Scribe transcript into Zoom via the third-party closed-caption API token.
+- Turn-taking for a natural-sounding meeting: `listen.py` (or a streaming version) until ~1.5-2 s of silence, back
+  off a random 0.5-2 s if someone else starts, then `speak.py`. The trio test used a fixed stagger instead
+  (Devin n waits (n-1) x 25 s after the roster is complete) and had no overlap.
 
 ## Limits
 - Paid host account: no 40-min cap. Free account: 40-min cap on 3+ participant meetings even with no host present.
