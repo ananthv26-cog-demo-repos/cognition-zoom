@@ -1,8 +1,8 @@
 # cognition-zoom
 
 Tooling for the "N Devins on one Zoom call" demo: a parent Devin session creates a
-host-less Zoom meeting through the Zoom REST API, then child sessions (Mac or Linux
-VMs) join it as named guests through the Zoom desktop app (web client as fallback).
+host-less Zoom meeting through the Zoom REST API, then child sessions (Mac, Linux or
+Windows VMs) join it as named guests through the Zoom desktop app (web client as fallback).
 
 ## Layout
 
@@ -11,6 +11,7 @@ VMs) join it as named guests through the Zoom desktop app (web client as fallbac
 | `scripts/zoom_meeting.py` | Server-to-Server OAuth token + `POST /users/{host}/meetings`; prints `join_url`, a web-client URL and a `zoommtg://` deep link. `--end ID` ends it when the demo is over; `--list-live`, `--delete ID` (each needs its scope, see Secrets). |
 | `scripts/join_zoom.sh` | `join_zoom.sh <url> [display name]`. Zoom desktop app via `zoommtg://` when installed (macOS: app matches `uname -m`; Linux: `/usr/bin/zoom`), else a plain Chrome (own profile, no automation flags, so the join is not blocked as a bot). `ZOOM_JOIN_MODE=desktop|chrome|safari` overrides. |
 | `scripts/linux_audio.sh` | Linux BlackHole equivalent: PulseAudio null sinks `DevinMic` (play TTS here) + `ZoomOut` (Zoom speaker) and remap source `DevinMicSrc` (Zoom mic). Idempotent; `join_zoom.sh` runs it before the desktop app. |
+| `scripts/windows/vb-audio-driver-signer.cer` | VB-Audio's public code-signing certificate (exported from the Hi-Fi Cable driver `.cat`). `certutil -addstore TrustedPublisher` it so the Hi-Fi Cable driver installs without the "Windows Security" publisher dialog (the blueprint removes the trust again after the install). Windows has no `join_zoom.sh`: the `zoommtg://` deep link is the whole join (skill section 4). |
 | `scripts/speak.py` | `speak.py "text"`: ElevenLabs TTS (natural voice, `--voice Roger`, `--list-voices`) played into the Zoom mic (`paplay --device=devin_mic` on Linux, `afplay` with system output = BlackHole 2ch on macOS). Falls back to `say -a "BlackHole 2ch"` / `espeak-ng` without `ELEVENLABS_API_KEY`. `--if-quiet` waits for a gap in the meeting audio (random 0.5-2 s, backs off if someone else starts). |
 | `scripts/listen.py` | `listen.py --seconds 15`: records what the meeting says (`zoom_out.monitor` on Linux, `BlackHole 16ch` via ffmpeg on macOS) and transcribes it with ElevenLabs Scribe, `keyterms` biased to "Devin" so names come back right. `--json` gives words + `speaker_id`. `--until-silence 2` blocks until the current speaker has paused for 2 s (turn-taking). |
 | `scripts/dismiss_notifications.sh` | macOS: closes every Notification Center banner (Zoom background-activity, Chrome notification prompts) via Accessibility so they do not cover the Zoom window. Run by `join_zoom.sh`; rerun whenever a banner shows up. |
@@ -42,7 +43,10 @@ scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>"
 # child (Linux): desktop app, name pre-filled, mic=DevinMicSrc speaker=ZoomOut; then computer use: Join
 scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>" "Devin 2"
 PULSE_SINK=devin_mic espeak-ng "Hello from Devin two"     # or: paplay --device=devin_mic tts.wav
-# any participant: natural voice in, transcript out (needs ELEVENLABS_API_KEY)
+# child (Windows, PowerShell): desktop app, name pre-filled, mic=CABLE Output speaker=Hi-Fi Cable Input; then computer use: Join
+#   Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<encrypted_password>&uname=Devin%20Win"
+#   Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("Hello from Devin Win")
+# any macOS/Linux participant: natural voice in, transcript out (needs ELEVENLABS_API_KEY; no Windows port yet, Windows uses System.Speech above)
 scripts/speak.py --voice Roger "Hi everyone, Devin 2 here."
 scripts/listen.py --seconds 15
 # parent, when done
@@ -89,6 +93,33 @@ python3 scripts/zoom_meeting.py --end <id>
   ("Zoom cannot detect your microphone"); the `module-remap-source` over `devin_mic.monitor`
   in `linux_audio.sh` is what makes `DevinMicSrc` appear. Devices added while Zoom is running
   do show up in the picker.
+- 2026-09-11, Windows Devin VM (Windows Server 2022 x64, no audio hardware, elevated shell,
+  UAC off, no `winget`), Zoom desktop app. **No reboot was needed** at any step.
+
+  | Command | Result | Time |
+  |---------|--------|------|
+  | `Get-CimInstance Win32_SoundDevice` / `Get-AudioDevice -List` (baseline) | no sound device, 0 endpoints; `Audiosrv` + `AudioEndpointBuilder` are **Stopped/Disabled** | 1 s |
+  | `Set-Service Audiosrv -StartupType Automatic; Start-Service Audiosrv` (same for `AudioEndpointBuilder`) | ok; without this no virtual cable ever enumerates | <1 s |
+  | `Install-Module AudioDeviceCmdlets -Force -Scope CurrentUser` | ok, `Get-AudioDevice`/`Set-AudioDevice` | 7 s |
+  | `winget install --id VB-Audio.VBCable` | **`winget` is not installed** on Server 2022 | — |
+  | `choco install vb-cable -y` | "installed" (driver pack 43) but `Get-AudioDevice -List` stays empty | ~20 s |
+  | `curl.exe -sL -o VBCABLE_Driver_Pack45.zip https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip`, `Expand-Archive`, `VBCABLE_Setup_x64.exe -i -h` | ok: playback `CABLE Input`, `CABLE In 16ch`; recording `CABLE Output`, enumerated immediately, no reboot | 2 s + 9 s (1 s rerun) |
+  | `HiFiCableAsioBridgeSetup.exe -i -h` (second cable, Zoom speaker) | first run stops on a "Windows Security" driver-publisher dialog (2015 signature); after `certutil -addstore TrustedPublisher scripts\windows\vb-audio-driver-signer.cer` it is silent: `Hi-Fi Cable Input`/`Output` | 1.5 s |
+  | `curl.exe -sL -o ZoomInstallerFull.msi https://zoom.us/client/latest/ZoomInstallerFull.msi` + `msiexec /i ... /qn /norestart` | installs but **32-bit**: `C:\Program Files (x86)\Zoom\bin\Zoom.exe`, "upgrade to 64-bit" banner | 14 min (212 MB, throttled CDN) + 20 s |
+  | `curl.exe -sL -o ZoomInstallerFull-x64.msi "https://zoom.us/client/latest/ZoomInstallerFull.msi?archType=x64"` + `msiexec /i ... /qn /norestart` | ok, Zoom Workplace 7.1.8 at `C:\Program Files\Zoom\bin\Zoom.exe` (x86 build replaced) | 7 s + 20 s (2 s rerun) |
+  | `python scripts/zoom_meeting.py --topic "Windows spike" --duration 60 --json` | ok on the VM's Python 3.12 (`C:\devin\python`) | 2 s |
+  | `Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Devin%20Win"` | preview opens with **Devin Win** pre-filled, "No camera connected"; first showed "Allow Zoom Workplace to access your microphone" until the `ConsentStore\microphone` = `Allow` registry values were set. **Join** said "The host has another meeting in progress" for ~25 min (another Devin's meeting was live); Zoom retried by itself and **joined as guest `Devin Win`** the moment that meeting ended | 5 s to preview |
+  | **Audio ^** in the meeting (also Settings > Audio from the preview) | microphone list `CABLE Output`, `Hi-Fi Cable Output`, `Same as system (CABLE Output)`; speaker list `CABLE Input`, `CABLE In 16ch`, `Hi-Fi Cable Input`, `Same as system (CABLE Input)`; picked mic = CABLE Output, speaker = Hi-Fi Cable Input, remembered on the next join | — |
+  | `Set-AudioDevice -ID (... 'CABLE Input*').ID` then `Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("Hello from Devin Windows, testing captions...")` | mic level meter lights up green for the phrase ("Microsoft David Desktop" voice); **More > Show captions transcribes it**: "Hello from Devon Windows, testing captions This is Devin Wynne speaking through the virtual cable" | 7 s for the 2-sentence phrase |
+  | `Start-Process msedge "https://app.zoom.us/wc/join/<id>?pwd=<enc>"` (plain Edge, first launch) | Edge first-run wizard once; web client loads; Edge asks for camera+mic (needed `ConsentStore\webcam` = `Allow` too, else "give Edge access"); device picker lists **all four VB-Audio endpoints**; but **Join -> "Automated bots aren't allowed to join this meeting"** (reCAPTCHA) even in plain Edge, so no web-client join on Windows | 10 s |
+  | `python scripts/zoom_meeting.py --list-live` / `--end <id>` | ok: `--list-live` showed the blocking meeting, later ours; `--end` ended it ("The host ended this meeting" in the desktop app), `--list-live` -> "no live meetings" | <1 s |
+
+  Everything in the `runs-on: windows` blueprint document re-ran green end-to-end on this
+  VM (~20 s; ~6 s once installed). Each install step is guarded (`Get-PnpDevice` / `Test-Path`),
+  asserts its outcome (throws if the device or `Zoom.exe` is missing, or `msiexec` exits
+  other than 0/3010), deletes its download, and drops the publisher trust again after the
+  Hi-Fi install. Gotcha: `HiFiCableAsioBridgeSetup.exe -i` on an already installed Hi-Fi
+  Cable *removes* it, hence the guard; `VBCABLE_Setup_x64.exe -i` is a harmless reinstall.
 - 2026-09-11, **3 macOS Devin VMs in one meeting** (parent on Linux as "Observer", one meeting from
   the API, three child sessions from the macOS snapshot with Zoom + BlackHole preinstalled):
 

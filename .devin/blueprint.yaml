@@ -46,3 +46,85 @@ knowledge:
   - name: join meeting (child)
     contents: |
       scripts/join_zoom.sh "<join_url>" "Devin 1"    # Zoom desktop app via zoommtg://; ZOOM_JOIN_MODE=safari for the web client
+---
+# Windows: verified 2026-09-11 on a Devin Windows Server 2022 x64 VM (see README "Verified").
+# No reboot was needed: both VB-Audio drivers enumerate right after their silent installer exits.
+# Every step below re-ran green on the same VM (idempotent); the whole block takes ~20 s with a warm CDN.
+runs-on: windows
+shell: powershell
+initialize:
+  - name: audio stack (the VM boots with Audiosrv disabled and zero endpoints)
+    run: |
+      Set-Service AudioEndpointBuilder -StartupType Automatic; Start-Service AudioEndpointBuilder
+      Set-Service Audiosrv -StartupType Automatic; Start-Service Audiosrv
+      Install-Module AudioDeviceCmdlets -Force -Scope CurrentUser
+  - name: VB-CABLE pack 45 = Zoom mic ("CABLE Input" playback -> "CABLE Output" recording)
+    run: |
+      # The chocolatey vb-cable package (pack 43) installs but enumerates nothing on Server 2022; pack 45 works.
+      # The installers' exit codes are not documented, so the step asserts on a healthy (Status OK) PnP device instead.
+      $ErrorActionPreference = 'Stop'
+      $ok = { Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Virtual Cable' -Status OK -ErrorAction SilentlyContinue }
+      if (-not (& $ok)) {
+        curl.exe -sfL -o $HOME\VBCABLE_Driver_Pack45.zip https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
+        Expand-Archive -Force $HOME\VBCABLE_Driver_Pack45.zip $HOME\vbcable45
+        Start-Process -Wait -FilePath $HOME\vbcable45\VBCABLE_Setup_x64.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\vbcable45
+        Remove-Item -Recurse -Force $HOME\VBCABLE_Driver_Pack45.zip, $HOME\vbcable45
+      }
+      if (-not (& $ok)) { throw 'VB-CABLE did not install' }
+  - name: Hi-Fi Cable = Zoom speaker (second, independent cable so meeting audio cannot loop into the mic)
+    run: |
+      # 2015 driver signed by VB-Audio only: trusting the publisher for the duration of the install is what makes
+      # -h (hidden) truly unattended; the exact cert is removed again right after, but only if this step added it
+      # (the installed driver keeps working without it).
+      # Not idempotent: running -i on an installed Hi-Fi Cable removes it, hence the guard.
+      $ErrorActionPreference = 'Stop'
+      $ok = { Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -Status OK -ErrorAction SilentlyContinue }
+      if (-not (& $ok)) {
+        $cer = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList (Resolve-Path scripts\windows\vb-audio-driver-signer.cer).Path
+        $trust = "Cert:\LocalMachine\TrustedPublisher\$($cer.Thumbprint)"
+        $addedTrust = -not (Test-Path $trust)
+        try {
+          if ($addedTrust) { certutil -addstore -f TrustedPublisher scripts\windows\vb-audio-driver-signer.cer }
+          curl.exe -sfL -o $HOME\HiFiCable.zip https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip
+          Expand-Archive -Force $HOME\HiFiCable.zip $HOME\hificable
+          Start-Process -Wait -FilePath $HOME\hificable\HiFiCableAsioBridgeSetup.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\hificable
+        } finally {
+          if ($addedTrust -and (Test-Path $trust)) { Remove-Item $trust }
+          Remove-Item -Recurse -Force $HOME\HiFiCable.zip, $HOME\hificable -ErrorAction SilentlyContinue
+        }
+      }
+      if (-not (& $ok)) { throw 'Hi-Fi Cable did not install' }
+  - name: defaults (system output -> CABLE Input so TTS lands in the Zoom mic) + desktop-app microphone access
+    run: |
+      # The 16-channel endpoint is 'CABLE In 16ch', so 'CABLE Input*' matches exactly one playback device.
+      $ErrorActionPreference = 'Stop'
+      Import-Module AudioDeviceCmdlets
+      foreach ($want in @{ Type = 'Playback'; Name = 'CABLE Input*' }, @{ Type = 'Recording'; Name = 'CABLE Output*' }) {
+        $dev = @(Get-AudioDevice -List | Where-Object { $_.Type -eq $want.Type -and $_.Name -like $want.Name })
+        if ($dev.Count -ne 1) { throw "expected exactly one $($want.Type) '$($want.Name)' endpoint, found $($dev.Count)" }
+        Set-AudioDevice -ID $dev[0].ID | Out-Null
+        if ((Get-AudioDevice -List | Where-Object { $_.Type -eq $want.Type -and $_.Default }).ID -ne $dev[0].ID) { throw "$($want.Type) default is not $($dev[0].Name)" }
+      }
+      $cs = 'SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone'
+      foreach ($k in "HKLM:\$cs", "HKCU:\$cs", "HKCU:\$cs\NonPackaged") { New-Item -Force $k | Out-Null; Set-ItemProperty $k -Name Value -Value Allow }
+  - name: Zoom desktop client, 64-bit -> C:\Program Files\Zoom\bin\Zoom.exe
+    run: |
+      # The unsuffixed ZoomInstallerFull.msi is the 32-bit build (Program Files (x86), "upgrade to 64-bit" nag).
+      $zoom = 'C:\Program Files\Zoom\bin\Zoom.exe'
+      if (-not (Test-Path $zoom)) {
+        curl.exe -sfL -o $HOME\ZoomInstallerFull-x64.msi "https://zoom.us/client/latest/ZoomInstallerFull.msi?archType=x64"
+        $p = Start-Process -Wait -PassThru msiexec -ArgumentList '/i', "$HOME\ZoomInstallerFull-x64.msi", '/qn', '/norestart'
+        Remove-Item $HOME\ZoomInstallerFull-x64.msi
+        if ($p.ExitCode -notin 0, 3010) { throw "msiexec exit $($p.ExitCode)" }
+      }
+      if (-not (Test-Path $zoom)) { throw 'Zoom.exe missing after install' }
+knowledge:
+  - name: audio devices
+    contents: |
+      Get-AudioDevice -List     # expect CABLE Input/CABLE Output (mic cable) + Hi-Fi Cable Input/Output (speaker cable)
+      Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("hello from Devin")
+      # plays on the default output = CABLE Input -> Zoom mic level moves; More > Show captions transcribes it
+  - name: join meeting (child)
+    contents: |
+      Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Devin%20Win"   # then computer use: Join
+      # Zoom Settings > Audio: speaker = Hi-Fi Cable Input, microphone = CABLE Output (never "Same as system" for both)
