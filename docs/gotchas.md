@@ -95,8 +95,9 @@ script that implements it is named so nobody has to rediscover it.
   software?" dialog.** The Hi-Fi Cable driver (2015) is signed by VB-Audio (Vincent Burel) but not WHQL, so
   Windows asks before trusting the publisher. Pre-trust it: `certutil -addstore -f TrustedPublisher
   scripts\windows\vb-audio-driver-signer.cer` (the cert exported from the `.cat` file), then the same command
-  finishes silently in 1.5 s. The trust is only needed during the install: the blueprint removes the cert from
-  `Cert:\LocalMachine\TrustedPublisher` right after, and the installed driver keeps working.
+  finishes silently in 1.5 s. The trust is only needed during the install: the blueprint removes that exact cert
+  (by thumbprint, and only if it added it) from `Cert:\LocalMachine\TrustedPublisher` right after; the installed
+  driver keeps working.
 - [win] **Installer "succeeded" but the device / `Zoom.exe` is missing.** `Start-Process -Wait` never fails a step
   on a nonzero exit code. The blueprint asserts on the outcome instead (`Get-PnpDevice` for both cables,
   `Test-Path 'C:\Program Files\Zoom\bin\Zoom.exe'` + `-PassThru` exit code 0/3010 for `msiexec`) and throws.

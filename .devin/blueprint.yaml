@@ -72,15 +72,19 @@ initialize:
   - name: Hi-Fi Cable = Zoom speaker (second, independent cable so meeting audio cannot loop into the mic)
     run: |
       # 2015 driver signed by VB-Audio only: trusting the publisher for the duration of the install is what makes
-      # -h (hidden) truly unattended; the trust is removed again right after (the installed driver keeps working).
+      # -h (hidden) truly unattended; the exact cert is removed again right after, but only if this step added it
+      # (the installed driver keeps working without it).
       # Not idempotent: running -i on an installed Hi-Fi Cable removes it, hence the guard.
       if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -ErrorAction SilentlyContinue)) {
-        certutil -addstore -f TrustedPublisher scripts\windows\vb-audio-driver-signer.cer
+        $cer = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList (Resolve-Path scripts\windows\vb-audio-driver-signer.cer).Path
+        $trust = "Cert:\LocalMachine\TrustedPublisher\$($cer.Thumbprint)"
+        $addedTrust = -not (Test-Path $trust)
+        if ($addedTrust) { certutil -addstore -f TrustedPublisher scripts\windows\vb-audio-driver-signer.cer }
         curl.exe -sfL -o $HOME\HiFiCable.zip https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip
         Expand-Archive -Force $HOME\HiFiCable.zip $HOME\hificable
         Start-Process -Wait -FilePath $HOME\hificable\HiFiCableAsioBridgeSetup.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\hificable
         Remove-Item -Recurse -Force $HOME\HiFiCable.zip, $HOME\hificable
-        Get-ChildItem Cert:\LocalMachine\TrustedPublisher | Where-Object { $_.Subject -like 'CN=Vincent Burel*' } | Remove-Item
+        if ($addedTrust) { Remove-Item $trust }
       }
       if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -ErrorAction SilentlyContinue)) { throw 'Hi-Fi Cable did not install' }
   - name: defaults (system output -> CABLE Input so TTS lands in the Zoom mic) + desktop-app microphone access
