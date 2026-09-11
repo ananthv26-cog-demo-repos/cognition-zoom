@@ -18,7 +18,9 @@ VMs) join it as named guests through Zoom's web client.
 Personal Devin secrets (owner: Ananth): `ZOOM_S2S_ACCOUNT_ID`, `ZOOM_S2S_CLIENT_ID`,
 `ZOOM_S2S_CLIENT_SECRET`, `ZOOM_HOST_EMAIL`. They belong to a Server-to-Server OAuth app
 on a paid personal Zoom account with `meeting:write:meeting:admin` and
-`meeting:read:meeting:admin` scopes. No Zoom accounts are needed for the joining Devins.
+`meeting:read:meeting:admin` scopes (create). `--end`, `--delete` and `--list-live` also need
+`meeting:update:status:admin`, `meeting:delete:meeting:admin` and
+`meeting:read:list_meetings:admin`. No Zoom accounts are needed for the joining Devins.
 
 ## Quick start
 

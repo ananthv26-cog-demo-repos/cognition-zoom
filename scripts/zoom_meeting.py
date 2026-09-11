@@ -131,9 +131,10 @@ def main() -> None:
     ap.add_argument("--topic", default="Devin standup")
     ap.add_argument("--duration", type=int, default=60)
     ap.add_argument("--json", action="store_true", help="print machine-readable JSON only")
-    ap.add_argument("--delete", metavar="MEETING_ID")
-    ap.add_argument("--end", metavar="MEETING_ID", help="end an in-progress meeting")
-    ap.add_argument("--list-live", action="store_true", help="list in-progress meetings on the host")
+    cmd = ap.add_mutually_exclusive_group()
+    cmd.add_argument("--delete", metavar="MEETING_ID")
+    cmd.add_argument("--end", metavar="MEETING_ID", help="end an in-progress meeting")
+    cmd.add_argument("--list-live", action="store_true", help="list in-progress meetings on the host")
     args = ap.parse_args()
 
     token = get_token()
