@@ -6,19 +6,25 @@
 # meeting. If no meeting window exists this re-fires the zoommtg:// deep link
 # so the join preview comes up again.
 #
-#   scripts/show_meeting_window.sh "<join_url>" [window title substring]
+#   scripts/show_meeting_window.sh "<join_url>" [window title substring] [display name]
+# Pass the display name so a re-fired join keeps the roster identity.
 # On Windows use the PowerShell equivalent in SKILL.md §4.
 set -uo pipefail
 
-URL="${1:?usage: show_meeting_window.sh <zoom url> [window title substring]}"
+URL="${1:?usage: show_meeting_window.sh <zoom url> [window title substring] [display name]}"
 WANT="${2:-}"
+NAME="${3:-}"
+
+MEETING_ID="$(sed -E 's#.*/(j|join)/([0-9]+).*#\2#' <<<"$URL")"
 
 deep_link() {
-  local id pwd_
-  id="$(sed -E 's#.*/(j|join)/([0-9]+).*#\2#' <<<"$URL")"
+  local pwd_ enc_name=""
   pwd_="$(sed -nE 's#.*[?&]pwd=([^&]+).*#\1#p' <<<"$URL")"
-  [[ "$id" =~ ^[0-9]+$ ]] || { echo "cannot parse meeting id from $URL" >&2; exit 1; }
-  echo "zoommtg://zoom.us/join?confno=${id}${pwd_:+&pwd=$pwd_}"
+  [[ "$MEETING_ID" =~ ^[0-9]+$ ]] || { echo "cannot parse meeting id from $URL" >&2; exit 1; }
+  if [ -n "$NAME" ]; then
+    enc_name="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1], safe=""))' "$NAME" 2>/dev/null || echo "$NAME")"
+  fi
+  echo "zoommtg://zoom.us/join?confno=${MEETING_ID}${pwd_:+&pwd=$pwd_}${enc_name:+&uname=$enc_name}"
 }
 
 case "$(uname -s)" in
@@ -58,9 +64,8 @@ EOF
 )"
     echo "$RESULT"
     if [ "$RESULT" = "home-only" ] || [ "$RESULT" = "no-zoom" ]; then
-      DEEP="$(deep_link)"
-      open "$DEEP"
-      echo "re-fired $DEEP"
+      open "$(deep_link)"
+      echo "re-fired join deep link for meeting $MEETING_ID"
     fi
     ;;
   Linux)
@@ -70,15 +75,15 @@ EOF
       wmctrl -a "$WANT"; FOUND="$WANT"
     else
       while IFS= read -r line; do
-        title="${line#* devin-box }"
+        wid="${line%% *}"
+        title="${line#* * * }"   # wmctrl -l columns: winid desktop host title
         case "$title" in *"Zoom Workplace"*) continue;; esac
-        wmctrl -a "$title" && FOUND="$title" && break
+        wmctrl -i -a "$wid" && FOUND="$title" && break
       done < <(wmctrl -l | grep -i zoom)
     fi
     if [ -z "$FOUND" ]; then
-      DEEP="$(deep_link)"
-      nohup /usr/bin/zoom "$DEEP" >"$HOME/zoom-desktop.log" 2>&1 &
-      echo "re-fired $DEEP"
+      nohup /usr/bin/zoom "$(deep_link)" >"$HOME/zoom-desktop.log" 2>&1 &
+      echo "re-fired join deep link for meeting $MEETING_ID"
     else
       echo "raised $FOUND"
     fi

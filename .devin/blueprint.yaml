@@ -13,9 +13,9 @@ knowledge:
       python3 scripts/zoom_meeting.py --topic "Devin standup" --duration 60 --json
   - name: join meeting (child)
     contents: |
-      scripts/join_zoom.sh "<join_url or web_client_url>" "Devin Child N (Linux)"   # Zoom desktop app; runs linux_audio.sh first
+      scripts/join_zoom.sh "<join_url or web_client_url>" "Linux 1"   # Zoom desktop app; runs linux_audio.sh first
       # computer use: scripts/show_meeting_window.sh "<join_url>" "<topic>"; Join; Audio ^ -> mic DevinMicSrc, speaker ZoomOut
-      # naming: children are "Devin Child N (<OS>)", the parent's seat is "Devin Parent"
+      # naming: children are "Mac 1"/"Mac 2"/"Win" by OS (no "Devin" — captions mishear it), parent = "Parent"
   - name: speak into the Zoom mic
     contents: |
       PULSE_SINK=devin_mic espeak-ng "hello from Devin"      # or paplay --device=devin_mic tts.wav
@@ -46,7 +46,7 @@ knowledge:
       say "hello from Devin"                   # Zoom mic level should move; More > Show captions transcribes it
   - name: join meeting (child)
     contents: |
-      scripts/join_zoom.sh "<join_url>" "Devin Child 1 (Mac)"    # Zoom desktop app via zoommtg://; ZOOM_JOIN_MODE=safari for the web client
+      scripts/join_zoom.sh "<join_url>" "Mac 1"    # Zoom desktop app via zoommtg://; ZOOM_JOIN_MODE=safari for the web client
       # also starts approve_mic_prompts.sh (auto-Allow on the devin-remote mic TCC dialog)
       # sign-in window instead of a meeting window? -> scripts/show_meeting_window.sh "<join_url>" "<topic>"
 ---
@@ -134,6 +134,6 @@ knowledge:
       python scripts\listen.py --seconds 15                     # Hi-Fi Cable Output (ffmpeg dshow) -> Scribe transcript of the meeting
   - name: join meeting (child)
     contents: |
-      Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Devin%20Child%203%20(Windows)"   # then computer use: Join
+      Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Win"   # then computer use: Join
       # stuck on the Zoom Workplace sign-in window? re-run Start-Process, then (New-Object -ComObject WScript.Shell).AppActivate('<topic>')
       # preview Audio ^: speaker = Hi-Fi Cable Input (Zoom defaults it to CABLE Input = the mic feed), microphone = CABLE Output
