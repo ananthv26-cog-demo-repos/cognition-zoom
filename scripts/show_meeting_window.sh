@@ -39,8 +39,11 @@ ObjC.import('CoreGraphics');
 ObjC.import('Foundation');
 function run(argv) {
   const pids = argv.map(Number);
-  const list = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements, $.kCGNullWindowID);
-  const wins = ObjC.deepUnwrap($.CFBridgingRelease(list));
+  // kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID.
+  // The CFArrayRef must go through castRefToObject: $.CFBridgingRelease on it
+  // segfaults osascript (observed on macOS 26).
+  const list = $.CGWindowListCopyWindowInfo(1 | 16, 0);
+  const wins = ObjC.deepUnwrap(ObjC.castRefToObject(list));
   const out = [];
   for (const w of wins) {
     if (pids.indexOf(Number(w.kCGWindowOwnerPID)) < 0) continue;
