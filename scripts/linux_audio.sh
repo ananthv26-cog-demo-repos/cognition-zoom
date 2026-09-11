@@ -2,7 +2,8 @@
 # Linux equivalent of BlackHole: PulseAudio null sinks. Idempotent; run before Zoom starts.
 #   DevinMic    sink   -> play TTS here (paplay --device=devin_mic x.wav, or PULSE_SINK=devin_mic espeak-ng ...)
 #   DevinMicSrc source -> Zoom microphone (a remap of devin_mic.monitor; Zoom ignores raw *.monitor sources)
-#   ZoomOut     sink   -> Zoom speaker; capture it with parecord --device=zoom_out.monitor
+#   ZoomOut     sink   -> Zoom speaker (default sink, so "Same as System" does not feed meeting audio back
+#                         into DevinMicSrc); capture it with parecord --device=zoom_out.monitor
 # Needs: sudo apt-get install -y pulseaudio pulseaudio-utils
 set -euo pipefail
 
@@ -17,7 +18,7 @@ have sinks zoom_out || pactl load-module module-null-sink sink_name=zoom_out \
 have sources devin_mic_src || pactl load-module module-remap-source master=devin_mic.monitor \
   source_name=devin_mic_src source_properties=device.description=DevinMicSrc >/dev/null
 
-pactl set-default-sink devin_mic
+pactl set-default-sink zoom_out
 pactl set-default-source devin_mic_src
 pactl list short sinks
 pactl list short sources
