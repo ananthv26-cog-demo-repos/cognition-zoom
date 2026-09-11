@@ -27,6 +27,9 @@
 #   and approve_mic_prompts.sh is launched to auto-Allow the devin-remote mic TCC
 #   dialog. Afterwards, run show_meeting_window.sh if the Zoom Workplace sign-in
 #   window is on screen instead of the join preview / meeting window.
+#   Desktop mode does not return until the meeting window is on screen (Zoom can
+#   take ~45 s to map it, and screenshots taken before that show the old desktop);
+#   ZOOM_WINDOW_WAIT caps that wait.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,6 +82,7 @@ case "$(uname -s)" in
         DEEP="$(deep_link)"
         open "$DEEP"
         echo "opened zoom.us.app -> $DEEP"
+        ZOOM_NO_REFIRE=1 "$HERE/show_meeting_window.sh" "$URL" "" "$NAME" || true
         ;;
       safari)
         open -a Safari "$URL"
@@ -103,6 +107,7 @@ case "$(uname -s)" in
         DEEP="$(deep_link)"
         nohup /usr/bin/zoom "$DEEP" >"$HOME/zoom-desktop.log" 2>&1 &
         echo "launched zoom pid $! -> $DEEP"
+        ZOOM_NO_REFIRE=1 "$HERE/show_meeting_window.sh" "$URL" "" "$NAME" || true
         ;;
       chrome)
         BIN="$(ls -d /opt/.devin/chrome/chrome/linux-*/chrome-linux64/chrome 2>/dev/null | head -1 || true)"

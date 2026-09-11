@@ -50,6 +50,10 @@ WIN_SOURCE = os.environ.get("ZOOM_OUT_DSHOW", "Hi-Fi Cable Output (VB-Audio Hi-F
 RATE = 16000
 FRAME = RATE // 10  # 100 ms of s16le mono
 SPEECH_RMS = int(os.environ.get("ZOOM_SPEECH_RMS", "300"))  # Zoom's decoded speech sits around 1000-4000
+# Opening the virtual speaker device is slow the first time (macOS avfoundation takes several seconds to
+# hand over BlackHole), so the wait for the *first* frame is longer than the stall timeout that follows it.
+START_TIMEOUT = float(os.environ.get("ZOOM_CAPTURE_START_TIMEOUT", "12"))
+STALL_TIMEOUT = 3.0
 
 
 class CaptureError(RuntimeError):
@@ -83,6 +87,7 @@ class Capture:
             cmd = ["parecord", f"--device={LINUX_SOURCE}", "--raw", "--format=s16le", "--channels=1",
                    f"--rate={RATE}", "--latency-msec=100"]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        self.pending: bytes | None = None
         self.q: queue.Queue[bytes | None] = queue.Queue()
         self.pump = threading.Thread(target=self._pump, daemon=True)
         self.pump.start()
@@ -97,20 +102,38 @@ class Capture:
                     return
                 self.q.put(buf)
 
+    def wait_ready(self) -> "Capture":
+        """Block until the device hands over its first frame, so a caller's deadline covers listening time
+        and not the cold start of the recorder."""
+        if self.pending is None:
+            try:
+                self.pending = self.q.get(timeout=START_TIMEOUT)
+            except queue.Empty:
+                raise CaptureError(f"recorder produced no audio {START_TIMEOUT:g} s after it started")
+            if self.pending is None:
+                raise CaptureError(f"recorder exited with status {self.proc.wait()}")
+        return self
+
     def frames(self, deadline: float):
-        """Yield (pcm, rms) until `deadline` (monotonic). Raises CaptureError on recorder EOF or a 3 s stall."""
+        """Yield (pcm, rms) until `deadline` (monotonic). Raises CaptureError on recorder EOF, on a stall,
+        or when the device never starts delivering audio."""
+        patience = START_TIMEOUT if self.pending is None else STALL_TIMEOUT
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return
-            try:
-                buf = self.q.get(timeout=min(remaining, 3.0))
-            except queue.Empty:
-                if time.monotonic() >= deadline:
-                    return
-                raise CaptureError("recorder produced no audio for 3 s")
-            if buf is None:
-                raise CaptureError(f"recorder exited with status {self.proc.wait()}")
+            if (buf := self.pending) is not None:
+                self.pending = None
+            else:
+                try:
+                    buf = self.q.get(timeout=min(remaining, patience))
+                except queue.Empty:
+                    if time.monotonic() >= deadline:
+                        return
+                    raise CaptureError(f"recorder produced no audio for {patience:g} s")
+                if buf is None:
+                    raise CaptureError(f"recorder exited with status {self.proc.wait()}")
+            patience = STALL_TIMEOUT
             yield buf, rms(buf)
 
     def __enter__(self) -> "Capture":
@@ -134,7 +157,7 @@ def is_quiet(seconds: float) -> bool:
     observe the whole interval (never reports quiet it did not hear)."""
     with Capture() as cap:
         n = 0
-        for _, level in cap.frames(time.monotonic() + seconds + 10.0):  # slack for a slow (suspended) sink
+        for _, level in cap.wait_ready().frames(time.monotonic() + seconds + 10.0):  # slack for a slow sink
             if level >= SPEECH_RMS:
                 return False
             n += 1
@@ -151,7 +174,8 @@ def until_silence(silence: float, max_seconds: float, keep: bool = True, heard: 
     pcm: list[bytes] = []
     quiet = 0.0
     with Capture() as cap:
-        for buf, level in cap.frames(time.monotonic() + max_seconds):
+        # start the clock once the device is open: a slow cold start must not eat the listening window
+        for buf, level in cap.wait_ready().frames(time.monotonic() + max_seconds):
             if keep and (heard or level >= SPEECH_RMS):
                 pcm.append(buf)
             if level >= SPEECH_RMS:
