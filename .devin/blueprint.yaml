@@ -1,0 +1,48 @@
+# https://docs.devin.ai/onboard-devin/environment/git-backed-blueprints
+# Linux: verified 2026-09-11 on a Devin Ubuntu 22.04 x86_64 VM (see README "Verified").
+initialize: |
+  # PulseAudio null sinks are the BlackHole equivalent (created per session by scripts/linux_audio.sh).
+  sudo apt-get install -y pulseaudio pulseaudio-utils espeak-ng
+  # Zoom desktop client (Zoom Workplace) -> /usr/bin/zoom
+  curl -sL -o /tmp/zoom_amd64.deb https://zoom.us/client/latest/zoom_amd64.deb
+  sudo apt-get install -y /tmp/zoom_amd64.deb
+  rm -f /tmp/zoom_amd64.deb
+knowledge:
+  - name: create meeting (parent)
+    contents: |
+      python3 scripts/zoom_meeting.py --topic "Devin standup" --duration 60 --json
+  - name: join meeting (child)
+    contents: |
+      scripts/join_zoom.sh "<join_url or web_client_url>" "Devin 2"   # Zoom desktop app; runs linux_audio.sh first
+      # computer use: DISPLAY=:0 wmctrl -a "<topic>"; Join; Audio ^ -> mic DevinMicSrc, speaker ZoomOut
+  - name: speak into the Zoom mic
+    contents: |
+      PULSE_SINK=devin_mic espeak-ng "hello from Devin"      # or paplay --device=devin_mic tts.wav
+      # More > Show captions transcribes it; Zoom output is on zoom_out.monitor (parecord --device=zoom_out.monitor)
+  - name: end meeting (parent, when the demo is over)
+    contents: |
+      python3 scripts/zoom_meeting.py --end <id>   # --list-live finds stragglers
+  - name: notes
+    contents: |
+      Zoom secrets (ZOOM_S2S_*, ZOOM_HOST_EMAIL) are personal-scoped: present in sessions, not in builds.
+---
+# macOS: verified 2026-09-11 on a Devin macOS 26 arm64 VM (see README "Verified").
+runs-on: macos
+initialize: |
+  # Virtual audio devices: 2ch = Zoom mic input (TTS goes here), 16ch = Zoom speaker output.
+  brew install --cask blackhole-2ch blackhole-16ch
+  sudo killall coreaudiod
+  brew install switchaudio-osx
+  # Zoom desktop client; the default Zoom.pkg is x86_64-only and fails with "Bad CPU type" on arm64.
+  curl -sL -o /tmp/Zoom-arm64.pkg "https://zoom.us/client/latest/Zoom.pkg?archType=arm64"
+  sudo installer -pkg /tmp/Zoom-arm64.pkg -target /
+  rm -f /tmp/Zoom-arm64.pkg
+knowledge:
+  - name: audio devices
+    contents: |
+      system_profiler SPAudioDataType          # expect BlackHole 2ch + BlackHole 16ch
+      SwitchAudioSource -s "BlackHole 2ch"     # system output -> Zoom mic
+      say "hello from Devin"                   # Zoom mic level should move; More > Show captions transcribes it
+  - name: join meeting (child)
+    contents: |
+      scripts/join_zoom.sh "<join_url>" "Devin 1"    # Zoom desktop app via zoommtg://; ZOOM_JOIN_MODE=safari for the web client

@@ -1,6 +1,6 @@
 ---
 name: zoom-meeting
-description: Create a host-less Zoom meeting via the Zoom REST API (Server-to-Server OAuth) and join it from a Devin VM as a named guest (Zoom desktop app on macOS, plain Chrome on Linux). Use for multi-Devin Zoom demos (parent creates the meeting, children join with display names/personas and BlackHole audio).
+description: Create a host-less Zoom meeting via the Zoom REST API (Server-to-Server OAuth) and join it from a Devin VM as a named guest through the Zoom desktop app (macOS + BlackHole, Linux + PulseAudio null sinks; plain Chrome web client as fallback). Use for multi-Devin Zoom demos (parent creates the meeting, children join with display names/personas and virtual-audio mics).
 ---
 
 # Zoom meeting: create + join from a Devin VM
@@ -33,8 +33,8 @@ Facts verified 2026-09-11:
 - `join_url` already carries `?pwd=<encrypted_password>`; the web-client URL with the same `pwd` skips the passcode prompt.
 - Account settings that must stay on: "Show a Join from your browser link"; "Allow participants to join before host".
   Must stay off: "Only authenticated users can join meetings from Web client".
-- Management calls fail with HTTP 400 code 4711 when the matching scope is not granted on the app
-  (`--delete` did on 2026-09-11: `meeting:delete:meeting:admin` missing). Then just let the meeting expire.
+- Management calls fail with HTTP 400 code 4711 when the matching scope is not granted on the app.
+  `--list-live` and `--end` worked on 2026-09-11 once the scopes were added; `--delete` is untested.
 - **One live meeting per host.** While a previous join-before-host meeting on the same account is still "in
   progress", joining a new one shows "The host has another meeting in progress" with an auto-retry countdown.
   All Devins must join the *same* meeting; do not create one per child. It clears when the old meeting ends.
@@ -99,23 +99,51 @@ Gotchas:
 - There is no Devin-default Chrome on the macOS VM (no Chrome preinstalled), so the Linux "Automated bots aren't
   allowed" bot check has no macOS equivalent to hit.
 
-## 3. Join from a Linux VM (child session)
+## 3. Join from a Linux VM (child session) — verified 2026-09-11, Ubuntu 22.04 x86_64 Devin VM
 
-**Do not use Devin's default Chrome.** It runs with `--enable-automation` and a `Devin/1.0` user agent and Zoom's
-web client rejects it with "Automated bots aren't allowed to join this meeting" (reCAPTCHA). A second, plain Chrome
-instance with its own profile joins fine.
+Preferred path: **Zoom desktop app** (guest, no sign-in) with PulseAudio null sinks as the BlackHole
+equivalent. Live captions transcribe `espeak-ng` / `paplay` output, which proves the mic path end to end.
 
 ```bash
-scripts/join_zoom.sh "<web_client_url>"
+# one-time setup (also in the blueprint)
+sudo apt-get install -y pulseaudio pulseaudio-utils espeak-ng      # VM ships without pactl
+curl -sL -o ~/zoom_amd64.deb https://zoom.us/client/latest/zoom_amd64.deb   # 297 MB
+sudo apt-get install -y ~/zoom_amd64.deb                            # ~30 s -> /usr/bin/zoom (Zoom Workplace 7.1.x)
+
+# per meeting
+scripts/join_zoom.sh "<join_url_or_web_client_url>" "Devin 2"
+# = scripts/linux_audio.sh (sinks devin_mic + zoom_out, remap source devin_mic_src, set as defaults), then
+#   /usr/bin/zoom "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Devin%202"
 ```
 
-Then with computer use on the new window:
-1. "Enter Meeting Info" page: type the display name in **Your Name**, click **Join**. No account, no passcode.
-2. Dismiss the "Cannot detect your camera" / mic banner if there is no device. Click **Allow** on Chrome's mic prompt if one appears.
-3. Linux VMs have no audio device; joining still works.
-4. Verify: participant count in the bottom bar increments; your name tile is shown.
+Then with computer use (`DISPLAY=:0`; `wmctrl -a "<topic>"` brings the preview window to the front):
+1. Preview window shows the pre-filled name. Close the "Your speaker volume is low" toast if shown, click **Join**.
+   The audio dropdown defaults to "Computer audio"; if it says "Select audio", pick **Computer audio** first.
+   No permission prompts on Linux.
+2. **Audio ^**: microphone `DevinMicSrc` (and `Same as System (DevinMicSrc)`), speaker `DevinMic` / `ZoomOut`.
+   Pick mic = DevinMicSrc, speaker = ZoomOut; Zoom remembers it ("Custom audio combination") on the next join.
+3. Speak: `PULSE_SINK=devin_mic espeak-ng "Hello from Devin two"` or `paplay --device=devin_mic tts.wav`
+   (any TTS that writes a WAV works; espeak-ng is robotic and captions mishear names).
+   **More (…) > Show captions** turns on live captions without host involvement and transcribes it
+   (verified: "Hello from Bevin on Linux. This is a quick roundbox...", "Testing Popley Pot" for "Testing paplay path").
+4. Zoom's own output goes to `zoom_out`; capture it with `parecord --device=zoom_out.monitor out.wav` (for Wispr Flow / STT).
+5. Leave: **Leave > Leave meeting**, then `pkill -f /opt/zoom/zoom`.
+
+Gotchas:
+- Zoom's Linux client **does not list `*.monitor` sources as microphones** ("Zoom cannot detect your microphone").
+  `linux_audio.sh` adds a `module-remap-source` over `devin_mic.monitor`; that remap (`DevinMicSrc`) is what shows up.
+- Devices created while Zoom is already running do appear in the picker, but run `linux_audio.sh` first anyway so
+  the defaults are right when Zoom starts.
+- The desktop app opens a second "Zoom Workplace" home window (sign-in nag); ignore it.
+
+### Web client fallback on Linux (`ZOOM_JOIN_MODE=chrome scripts/join_zoom.sh "<web_client_url>"`)
+**Do not use Devin's default Chrome.** It runs with `--enable-automation` and a `Devin/1.0` user agent and Zoom's
+web client rejects it with "Automated bots aren't allowed to join this meeting" (reCAPTCHA). The plain Chrome
+instance the script launches (own profile) joins fine. Then: type the display name in **Your Name**, **Join**,
+dismiss the "Cannot detect your camera" banner, **Allow** Chrome's mic prompt. Not re-tested with the null sinks.
 
 ## Limits
 - Paid host account: no 40-min cap. Free account: 40-min cap on 3+ participant meetings even with no host present.
 - Nobody in the meeting is host, so nobody can start a cloud recording; record locally if needed.
 - Web client vs desktop: web client cannot be host and has limited device controls (Safari: no speaker choice).
+- Linux: `pulseaudio --start` is per-session (user daemon); `linux_audio.sh` restarts it and recreates the sinks if needed.
