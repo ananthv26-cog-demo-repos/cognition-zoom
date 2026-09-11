@@ -149,31 +149,78 @@ end run
 EOF
 }
 
-# A tile off by more than this many pixels leaves a seam that is visible in screenshots and recordings.
-LAYOUT_TOLERANCE=${LAYOUT_TOLERANCE:-6}
+# Uncovered pixels the viewer would see as a seam or a wallpaper strip. Checked on *edges*, not per window:
+# two windows each a few px off in opposite directions add up to a gap twice this wide.
+MAX_GAP=${MAX_GAP:-2}
 
-check_tile() {
-  local label=$1 pname=$2 wname=$3 x=$4 y=$5 w=$6 h=$7 frame d off=0
-  frame=$(win_frame "$pname" "$wname")
-  if [ -z "$frame" ]; then
-    echo "FAIL $label: no \"$wname\" window in $pname" >&2
+# "process | window" for every window of every visible app.
+visible_windows() {
+  osascript <<'EOF' 2>/dev/null
+tell application "System Events"
+  set out to ""
+  repeat with p in (every process whose visible is true and background only is false)
+    set pn to name of p
+    try
+      repeat with wdw in (every window of p)
+        set out to out & pn & " | " & (name of wdw) & linefeed
+      end repeat
+    end try
+  end repeat
+end tell
+return out
+EOF
+}
+
+edge_ok() {
+  local label=$1 actual=$2 expected=$3 d=$((${2} - ${3}))
+  if [ "${d#-}" -gt "$MAX_GAP" ]; then
+    echo "FAIL $label: at $actual, expected $expected" >&2
     return 1
   fi
-  # shellcheck disable=SC2086
-  set -- $frame
-  for d in $(($1 - x)) $(($2 - y)) $(($3 - w)) $(($4 - h)); do
-    [ "${d#-}" -le "$LAYOUT_TOLERANCE" ] || off=1
-  done
-  if [ "$off" = 1 ]; then
-    echo "FAIL $label: at $1,$2 ${3}x${4}, expected $x,$y ${w}x${h}" >&2
-    return 1
+}
+
+# Everything a viewer can see is checked here: the two frames, the edges they must be flush with, the Dock and
+# any window that survived hide_others.
+verify_split() {
+  local w=$1 h=$2 top=$3 rc=0 zf wf zx zy zw zh wx wy ww wh strays
+  zf=$(win_frame "zoom.us" "Zoom Meeting")
+  wf=$(win_frame "Wispr Flow" "Meeting Recorder")
+  [ -n "$zf" ] || { echo "FAIL no \"Zoom Meeting\" window (is the meeting joined?)" >&2; rc=1; }
+  [ -n "$wf" ] || { echo "FAIL no Wispr \"Meeting Recorder\" window (start a note first)" >&2; rc=1; }
+  [ "$rc" = 0 ] || return 1
+  read -r zx zy zw zh <<<"$zf"
+  read -r wx wy ww wh <<<"$wf"
+  edge_ok "zoom left edge" "$zx" 0 || rc=1
+  edge_ok "zoom top edge" "$zy" "$top" || rc=1
+  edge_ok "zoom bottom edge" "$((zy + zh))" "$h" || rc=1
+  edge_ok "wispr top edge" "$wy" "$top" || rc=1
+  edge_ok "wispr bottom edge" "$((wy + wh))" "$h" || rc=1
+  edge_ok "wispr right edge" "$((wx + ww))" "$w" || rc=1
+  edge_ok "seam (zoom right edge vs wispr left edge)" "$((zx + zw))" "$wx" || rc=1
+  edge_ok "split is centred (zoom width)" "$zw" "$((w / 2))" || rc=1
+  if [ "$(defaults read com.apple.dock autohide 2>/dev/null)" != 1 ]; then
+    echo "FAIL Dock is not auto-hidden (it covers the bottom of both halves)" >&2; rc=1
   fi
-  echo "ok $label: $1,$2 ${3}x${4}"
+  # hide_others suppresses its own failures (an app may refuse to hide); this is where that shows up.
+  strays=$(visible_windows | grep -v '^zoom\.us | Zoom Meeting$' | grep -v '^Wispr Flow | Meeting Recorder$' \
+    | grep -v '^Finder | $' | grep -v '^$' || true)
+  if [ -n "$strays" ]; then
+    echo "FAIL other windows are on screen - close or hide them:" >&2
+    echo "$strays" | sed 's/^/  /' >&2
+    rc=1
+  fi
+  echo "zoom $zx,$zy ${zw}x${zh}   wispr $wx,$wy ${ww}x${wh}"
+  return "$rc"
 }
 
 cmd_layout() {
-  local verify_only=0 bounds w h half top rc=0
-  [ "${1:-}" = --verify ] && verify_only=1
+  local verify_only=0 bounds w h half top
+  case "${1:-}" in
+    "") ;;
+    --verify) verify_only=1 ;;
+    *) echo "usage: $0 layout [--verify]" >&2; return 2 ;;
+  esac
+  [ "$#" -le 1 ] || { echo "usage: $0 layout [--verify]" >&2; return 2; }
   bounds=$(osascript -e 'tell application "Finder" to get bounds of window of desktop')
   w=$(echo "$bounds" | awk -F', ' '{print $3}'); h=$(echo "$bounds" | awk -F', ' '{print $4}')
   half=$((w / 2)); top=25  # menu bar
@@ -182,14 +229,13 @@ cmd_layout() {
     set_frame "zoom.us" "Zoom Meeting" 0 "$top" "$half" $((h - top))
     set_frame "Wispr Flow" "Meeting Recorder" "$half" "$top" "$half" $((h - top))
   fi
-  check_tile "zoom (left half)" "zoom.us" "Zoom Meeting" 0 "$top" "$half" $((h - top)) || rc=1
-  check_tile "wispr (right half)" "Wispr Flow" "Meeting Recorder" "$half" "$top" "$half" $((h - top)) || rc=1
-  if [ "$rc" != 0 ]; then
-    echo "split screen is NOT clean (screen ${w}x${h}) - do not record yet. Fix the offending window by hand:" >&2
-    echo "hover its green button > Tile Window to Left/Right of Screen (or drag-resize), then: $0 layout --verify" >&2
+  if ! verify_split "$w" "$h" "$top"; then
+    echo "split screen is NOT clean (screen ${w}x${h}) - do not record yet. Fix what is listed above by hand:" >&2
+    echo "hover a window's green button > Tile Window to Left/Right of Screen (or drag-resize), close stray" >&2
+    echo "windows, then re-run: $0 layout --verify" >&2
     return 1
   fi
-  echo "layout: clean split, Zoom left / Wispr right (screen ${w}x${h}) - now screenshot to confirm nothing shows behind"
+  echo "layout: clean split, Zoom left / Wispr right (screen ${w}x${h}) - now screenshot it and look at it"
 }
 
 cmd_status() {
