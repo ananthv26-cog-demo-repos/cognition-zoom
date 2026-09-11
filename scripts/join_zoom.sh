@@ -27,6 +27,10 @@
 #   and approve_mic_prompts.sh is launched to auto-Allow the devin-remote mic TCC
 #   dialog. Afterwards, run show_meeting_window.sh if the Zoom Workplace sign-in
 #   window is on screen instead of the join preview / meeting window.
+#   Desktop mode does not return until the meeting window is on screen (Zoom can
+#   take ~45 s to map it, and screenshots taken before that show the old desktop);
+#   ZOOM_WINDOW_WAIT caps that wait. Windows Zoom already had before the deep
+#   link (a previous meeting still open) do not count as the new one.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,8 +81,10 @@ case "$(uname -s)" in
     case "$MODE" in
       desktop)
         DEEP="$(deep_link)"
+        PRIOR="$("$HERE/show_meeting_window.sh" --snapshot)"
         open "$DEEP"
         echo "opened zoom.us.app -> $DEEP"
+        ZOOM_NO_REFIRE=1 ZOOM_PRIOR_WINDOWS="$PRIOR" "$HERE/show_meeting_window.sh" "$URL" "" "$NAME"
         ;;
       safari)
         open -a Safari "$URL"
@@ -101,8 +107,10 @@ case "$(uname -s)" in
         [ -x /usr/bin/zoom ] || { echo "zoom binary not found: /usr/bin/zoom (sudo apt-get install -y ./zoom_amd64.deb)" >&2; exit 1; }
         "$HERE/linux_audio.sh" >/dev/null || echo "linux_audio.sh failed; Zoom will report no microphone" >&2
         DEEP="$(deep_link)"
+        PRIOR="$("$HERE/show_meeting_window.sh" --snapshot)"
         nohup /usr/bin/zoom "$DEEP" >"$HOME/zoom-desktop.log" 2>&1 &
         echo "launched zoom pid $! -> $DEEP"
+        ZOOM_NO_REFIRE=1 ZOOM_PRIOR_WINDOWS="$PRIOR" "$HERE/show_meeting_window.sh" "$URL" "" "$NAME"
         ;;
       chrome)
         BIN="$(ls -d /opt/.devin/chrome/chrome/linux-*/chrome-linux64/chrome 2>/dev/null | head -1 || true)"
