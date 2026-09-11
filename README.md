@@ -11,7 +11,7 @@ Windows VMs) join it as named guests through the Zoom desktop app (web client as
 | `scripts/zoom_meeting.py` | Server-to-Server OAuth token + `POST /users/{host}/meetings`; prints `join_url`, a web-client URL and a `zoommtg://` deep link. `--end ID` ends it when the demo is over; `--list-live`, `--delete ID` (each needs its scope, see Secrets). |
 | `scripts/join_zoom.sh` | `join_zoom.sh <url> [display name]`. Zoom desktop app via `zoommtg://` when installed (macOS: app matches `uname -m`; Linux: `/usr/bin/zoom`), else a plain Chrome (own profile, no automation flags, so the join is not blocked as a bot). `ZOOM_JOIN_MODE=desktop|chrome|safari` overrides. |
 | `scripts/linux_audio.sh` | Linux BlackHole equivalent: PulseAudio null sinks `DevinMic` (play TTS here) + `ZoomOut` (Zoom speaker) and remap source `DevinMicSrc` (Zoom mic). Idempotent; `join_zoom.sh` runs it before the desktop app. |
-| `scripts/windows/vb-audio-driver-signer.cer` | VB-Audio's public code-signing certificate (exported from the Hi-Fi Cable driver `.cat`). `certutil -addstore TrustedPublisher` it so the Hi-Fi Cable driver installs without the "Windows Security" publisher dialog. Windows has no `join_zoom.sh`: the `zoommtg://` deep link is the whole join (skill section 4). |
+| `scripts/windows/vb-audio-driver-signer.cer` | VB-Audio's public code-signing certificate (exported from the Hi-Fi Cable driver `.cat`). `certutil -addstore TrustedPublisher` it so the Hi-Fi Cable driver installs without the "Windows Security" publisher dialog (the blueprint removes the trust again after the install). Windows has no `join_zoom.sh`: the `zoommtg://` deep link is the whole join (skill section 4). |
 | `scripts/dismiss_notifications.sh` | macOS: closes every Notification Center banner (Zoom background-activity, Chrome notification prompts) via Accessibility so they do not cover the Zoom window. Run by `join_zoom.sh`; rerun whenever a banner shows up. |
 | `.agents/skills/zoom-meeting/SKILL.md` | Step-by-step skill Devin sessions in this repo auto-load: create, hand off, join, set audio devices. |
 | `docs/wispr-zoom-demo-feasibility.md` | Audio architecture for the Mac VMs (BlackHole, Wispr Flow, realtime voice). |
@@ -106,6 +106,8 @@ python3 scripts/zoom_meeting.py --end <id>
   | `python scripts/zoom_meeting.py --list-live` / `--end <id>` | ok: `--list-live` showed the blocking meeting, later ours; `--end` ended it ("The host ended this meeting" in the desktop app), `--list-live` -> "no live meetings" | <1 s |
 
   Everything in the `runs-on: windows` blueprint document re-ran green end-to-end on this
-  VM (~20 s). Gotcha: `HiFiCableAsioBridgeSetup.exe -i` on an already installed Hi-Fi Cable
-  *removes* it, so the blueprint guards it with `Get-PnpDevice`; `VBCABLE_Setup_x64.exe -i`
-  is a harmless reinstall.
+  VM (~20 s; ~6 s once installed). Each install step is guarded (`Get-PnpDevice` / `Test-Path`),
+  asserts its outcome (throws if the device or `Zoom.exe` is missing, or `msiexec` exits
+  other than 0/3010), deletes its download, and drops the publisher trust again after the
+  Hi-Fi install. Gotcha: `HiFiCableAsioBridgeSetup.exe -i` on an already installed Hi-Fi
+  Cable *removes* it, hence the guard; `VBCABLE_Setup_x64.exe -i` is a harmless reinstall.
