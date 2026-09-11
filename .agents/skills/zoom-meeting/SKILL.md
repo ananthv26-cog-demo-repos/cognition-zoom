@@ -206,6 +206,7 @@ Does **not** work as a join path: the preview loads (after Edge's one-time welco
 `ConsentStore\webcam` = `Allow` so Edge may ask for camera+mic) and its device picker lists all four VB-Audio
 endpoints, but **Join** returns "Automated bots aren't allowed to join this meeting" (reCAPTCHA) even in plain,
 non-automated Edge — unlike plain Chrome on Linux/macOS. Use the desktop app.
+
 ## 5. Talking like a person (ElevenLabs, `ELEVENLABS_API_KEY`)
 
 ```bash
