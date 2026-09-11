@@ -14,31 +14,112 @@
 # Pass the display name so a re-fired join keeps the roster identity.
 # ZOOM_NO_REFIRE=1 only waits and raises (join_zoom.sh uses it right after it
 # launches Zoom, when re-firing would just start a second join).
-# ZOOM_PRIOR_WINDOWS holds the output of `show_meeting_window.sh --snapshot`
-# taken before the deep link was fired; those windows (a meeting Zoom was
-# already showing) are never accepted as the one being waited for.
+#
+#   scripts/show_meeting_window.sh --snapshot
+# prints the ids of Zoom's current windows (X window ids on Linux, CoreGraphics
+# window numbers on macOS), one per line; exits non-zero if they could not be
+# enumerated. join_zoom.sh takes it before firing the deep link and passes it as
+# ZOOM_PRIOR_WINDOWS, so a meeting Zoom was already showing is never accepted
+# as the one being waited for. Ids, not titles: a new window may reuse the
+# title of an old one (recurring topic).
 # On Windows use the PowerShell equivalent in SKILL.md §4.
 set -uo pipefail
 
+# zoom_windows prints "<window id>\t<title>" per Zoom-owned window.
+# Exit status: 0 = enumerated (no rows = Zoom is up but has mapped nothing yet),
+# 3 = no Zoom process, anything else = enumeration failed.
+mac_windows() {
+  local pids
+  pids="$(pgrep -x zoom.us)"
+  [ -z "$pids" ] && return 3
+  # CoreGraphics window numbers are stable for a window's lifetime; System Events
+  # windows only expose names, and two Zoom windows can share a name
+  osascript -l JavaScript - $pids <<'EOF'
+ObjC.import('CoreGraphics');
+ObjC.import('Foundation');
+function run(argv) {
+  const pids = argv.map(Number);
+  // kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID.
+  // The CFArrayRef must go through castRefToObject: $.CFBridgingRelease on it
+  // segfaults osascript (observed on macOS 26).
+  const list = $.CGWindowListCopyWindowInfo(1 | 16, 0);
+  const wins = ObjC.deepUnwrap(ObjC.castRefToObject(list));
+  const out = [];
+  for (const w of wins) {
+    if (pids.indexOf(Number(w.kCGWindowOwnerPID)) < 0) continue;
+    if (Number(w.kCGWindowLayer) !== 0) continue;
+    const name = w.kCGWindowName === undefined || w.kCGWindowName === null ? '' : String(w.kCGWindowName);
+    if (name === '') continue;
+    out.push(String(w.kCGWindowNumber) + '\t' + name);
+  }
+  return out.join('\n');
+}
+EOF
+}
+
+mac_raise() {  # $1 = CoreGraphics window number, $2 = title
+  # Accessibility windows carry no CG number. With one window of that title the
+  # match is exact; with several (recurring topic still open in a stale window)
+  # raise each in turn and accept only when CG (front-to-back order) shows $1 on top.
+  local n i
+  n="$(osascript - "$2" <<'EOF'
+on run argv
+  tell application "System Events" to tell process "zoom.us"
+    count (windows whose name is (item 1 of argv))
+  end tell
+end run
+EOF
+)" || return 1
+  for ((i = 1; i <= n; i++)); do
+    osascript - "$2" "$i" <<'EOF' >/dev/null || continue
+on run argv
+  tell application "System Events" to tell process "zoom.us"
+    set same to (windows whose name is (item 1 of argv))
+    perform action "AXRaise" of item ((item 2 of argv) as integer) of same
+    set frontmost to true
+  end tell
+end run
+EOF
+    [ "$n" = 1 ] && return 0
+    sleep 0.3
+    [ "$(mac_windows | head -n1 | cut -f1)" = "$1" ] && return 0
+  done
+  return 1
+}
+
+linux_windows() {
+  local pids
+  # find Zoom's windows by PID: the meeting window is titled after the meeting
+  # topic ("Devin standup"), so anything that greps window titles for "zoom"
+  # sees only the home window and never the meeting
+  pids="$(pgrep -x zoom; pgrep -f '/opt/zoom/zoom')"
+  [ -z "$pids" ] && return 3
+  wmctrl -lp | awk -v pids="^($(tr '\n' '|' <<<"$pids" | sed 's/|$//'))$" \
+    '$3 ~ pids { wid = $1; $1 = $2 = $3 = $4 = ""; sub(/^ +/, ""); if ($0 != "") print wid "\t" $0 }'
+}
+
+linux_raise() {  # raise by window id, never by title: wmctrl -a does its own
+  wmctrl -i -a "$1"  # substring match and could pick the home window instead
+}
+
+case "$(uname -s)" in
+  Darwin) zoom_windows() { mac_windows; }; raise_window() { mac_raise "$@"; } ;;
+  Linux)
+    export DISPLAY="${DISPLAY:-:0}"
+    zoom_windows() { linux_windows; }; raise_window() { linux_raise "$@"; } ;;
+  *)
+    echo "Windows: Start-Process \"zoommtg://...\" then WScript.Shell AppActivate (see SKILL.md §4)" >&2
+    exit 1
+    ;;
+esac
+
 if [ "${1:-}" = --snapshot ]; then
-  case "$(uname -s)" in
-    Darwin)
-      osascript -e 'tell application "System Events"
-        if not (exists process "zoom.us") then return ""
-        set out to ""
-        repeat with w in windows of process "zoom.us"
-          try
-            set out to out & (name of w) & linefeed
-          end try
-        end repeat
-        return out
-      end tell' ;;
-    Linux)
-      export DISPLAY="${DISPLAY:-:0}"
-      pids="$(pgrep -x zoom; pgrep -f '/opt/zoom/zoom')"
-      [ -n "$pids" ] && wmctrl -lp | awk -v pids="^($(tr '\n' '|' <<<"$pids" | sed 's/|$//'))$" '$3 ~ pids { print $1 }' ;;
+  rows="$(zoom_windows)"; rc=$?
+  case "$rc" in
+    0) cut -f1 <<<"$rows" | grep . ; exit 0 ;;
+    3) exit 0 ;;
+    *) echo "could not enumerate Zoom windows (status $rc)" >&2; exit 1 ;;
   esac
-  exit 0
 fi
 
 URL="${1:?usage: show_meeting_window.sh <zoom url> [window title substring] [display name]}"
@@ -64,67 +145,27 @@ deep_link() {
 }
 
 # Each attempt prints one of: "raised <title>" | "starting" (Zoom is up but has
-# not mapped a window yet) | "home-only" | "no-zoom".
-mac_attempt() {
-  osascript - "$WANT" "$PRIOR" <<'EOF'
-on run argv
-  set wantTitle to item 1 of argv
-  set priorTitles to paragraphs of (item 2 of argv)
-  tell application "System Events"
-    if not (exists process "zoom.us") then return "no-zoom"
-    tell process "zoom.us"
-      if (count of windows) is 0 then return "starting"
-      if wantTitle is not "" then
-        repeat with w in windows
-          try
-            -- never accept the home/sign-in window even if the topic matches it
-            if (name of w) contains wantTitle and (name of w) does not contain "Zoom Workplace" and priorTitles does not contain (name of w) then
-              perform action "AXRaise" of w
-              set frontmost to true
-              return "raised " & (name of w)
-            end if
-          end try
-        end repeat
-      end if
-      repeat with w in windows
-        try
-          set n to name of w
-          if n does not contain "Zoom Workplace" and n does not contain "Settings" and priorTitles does not contain n then
-            perform action "AXRaise" of w
-            set frontmost to true
-            return "raised " & n
-          end if
-        end try
-      end repeat
-      return "home-only"
-    end tell
-  end tell
-end run
-EOF
-}
-
-linux_attempt() {
-  local pids rows found=""
-  # find Zoom's windows by PID: the meeting window is titled after the meeting
-  # topic ("Devin standup"), so anything that greps window titles for "zoom"
-  # sees only the home window and never the meeting
-  pids="$(pgrep -x zoom; pgrep -f '/opt/zoom/zoom')"
-  [ -z "$pids" ] && { echo "no-zoom"; return; }
-  rows="$(wmctrl -lp | awk -v pids="^($(tr '\n' '|' <<<"$pids" | sed 's/|$//'))$" \
-    '$3 ~ pids { wid = $1; $1 = $2 = $3 = $4 = ""; sub(/^ +/, ""); if ($0 != "") print wid "\t" $0 }')"
+# not mapped a window yet) | "home-only" | "no-zoom" | "enum-failed".
+attempt() {
+  local rows rc found=""
+  rows="$(zoom_windows)"; rc=$?
+  case "$rc" in
+    0) ;;
+    3) echo "no-zoom"; return ;;
+    *) echo "enum-failed"; return ;;
+  esac
   [ -z "$rows" ] && { echo "starting"; return; }
   pick() {  # $1 = title substring to prefer ("" = any non-home zoom window)
     local wid title
     while IFS=$'\t' read -r wid title; do
+      [ -z "$wid" ] && continue
       case "$title" in *"Zoom Workplace"*|Settings) continue;; esac
       grep -qxF -- "$wid" <<<"$PRIOR" && continue
       [ -n "$1" ] && ! grep -qF -- "$1" <<<"$title" && continue
-      wmctrl -i -a "$wid" && { found="$title"; return 0; }
+      raise_window "$wid" "$title" && { found="$title"; return 0; }
     done <<<"$rows"
     return 1
   }
-  # raise by window ID, never by title: wmctrl -a does its own substring match
-  # and could pick the home window when both titles contain WANT
   pick "$WANT" || pick ""
   [ -n "$found" ] && echo "raised $found" || echo "home-only"
 }
@@ -136,15 +177,6 @@ refire() {
   esac
   echo "re-fired join deep link for meeting $MEETING_ID"
 }
-
-case "$(uname -s)" in
-  Darwin) attempt() { mac_attempt; } ;;
-  Linux)  export DISPLAY="${DISPLAY:-:0}"; attempt() { linux_attempt; } ;;
-  *)
-    echo "Windows: Start-Process \"zoommtg://...\" then WScript.Shell AppActivate (see SKILL.md §4)" >&2
-    exit 1
-    ;;
-esac
 
 refired=0
 begin="$(date +%s)"

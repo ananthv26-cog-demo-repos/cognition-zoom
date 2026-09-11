@@ -15,7 +15,7 @@ knowledge:
     contents: |
       scripts/join_zoom.sh "<join_url or web_client_url>" "Linux 1"   # Zoom desktop app; runs linux_audio.sh first
       # computer use: scripts/show_meeting_window.sh "<join_url>" "<topic>"; Join; Audio ^ -> mic DevinMicSrc, speaker ZoomOut
-      # naming: children are "Mac 1"/"Mac 2"/"Win" by OS (no "Devin" — captions mishear it), parent = "Parent"
+      # naming: children are "Mac VM 1"/"Mac VM 2"/"Windows VM" by OS (no "Devin" — captions mishear it), parent = "Parent"
   - name: speak into the Zoom mic
     contents: |
       PULSE_SINK=devin_mic espeak-ng "hello from Devin"      # or paplay --device=devin_mic tts.wav
@@ -38,6 +38,17 @@ initialize: |
   curl -sL -o /tmp/Zoom-arm64.pkg "https://zoom.us/client/latest/Zoom.pkg?archType=arm64"
   sudo installer -pkg /tmp/Zoom-arm64.pkg -target /
   rm -f /tmp/Zoom-arm64.pkg
+  # listen.py / converse.py capture BlackHole 16ch through ffmpeg (avfoundation).
+  command -v ffmpeg >/dev/null || brew install ffmpeg
+  # Wispr Flow Notetaker (skill section 7) is opt-in: the prompt must say "wispr". Preinstalling the casks only
+  # saves ~80 s per Mac child; nothing here launches, signs in to or configures Wispr. Chrome is needed because
+  # the Wispr sign-in page's hCaptcha never loads in Safari. `defaultbrowser` may pop a "Use Chrome" confirmation
+  # in a session, so the default browser is left alone here (wispr_notetaker.sh install sets it).
+  brew install --cask wispr-flow google-chrome
+  xattr -dr com.apple.quarantine "/Applications/Google Chrome.app" || true
+  brew install defaultbrowser
+  # Virtual-mouse clicks that miss a Wispr toast land on the wallpaper and macOS 26 then hides every window.
+  defaults write com.apple.WindowManager EnableStandardClickToShowDesktop -bool false
 knowledge:
   - name: audio devices
     contents: |
@@ -46,9 +57,20 @@ knowledge:
       say "hello from Devin"                   # Zoom mic level should move; More > Show captions transcribes it
   - name: join meeting (child)
     contents: |
-      scripts/join_zoom.sh "<join_url>" "Mac 1"    # Zoom desktop app via zoommtg://; ZOOM_JOIN_MODE=safari for the web client
+      scripts/join_zoom.sh "<join_url>" "Mac VM 1"    # Zoom desktop app via zoommtg://; ZOOM_JOIN_MODE=safari for the web client
       # also starts approve_mic_prompts.sh (auto-Allow on the devin-remote mic TCC dialog)
       # sign-in window instead of a meeting window? -> scripts/show_meeting_window.sh "<join_url>" "<topic>"
+      # in the meeting: Audio ^ -> mic BlackHole 2ch, speaker BlackHole 16ch (Zoom defaults the speaker to 2ch = the mic)
+  - name: converse (fast loop, needs ELEVENLABS_API_KEY + FIREWORKS_API_KEY)
+    contents: |
+      python3 scripts/converse.py --name "Mac VM 1" --voice Roger --check      # preflight first; secrets are injected at session start
+      python3 scripts/converse.py --name "Mac VM 1" --voice Roger --persona ~/persona.md --roster "Mac VM 2 (frontend)" --steer ~/steer.txt --log ~/turns.jsonl [--open "..."]
+  - name: wispr notetaker (ONLY if the prompt says "wispr"; skill section 7)
+    contents: |
+      scripts/wispr_notetaker.sh install && scripts/wispr_notetaker.sh devices && scripts/wispr_notetaker.sh launch
+      # sign in: Sign in via browser -> Continue with Google (never the email form: hCaptcha spins) -> click Sign in via browser / Open Wispr Flow a 2nd time
+      # Accessibility toggle asks for a password: scripts/wispr_notetaker.sh authdb grant ; flip toggle ; scripts/wispr_notetaker.sh authdb restore
+      # Zoom captions OFF; menu bar Notetaker > Start new note; scripts/wispr_notetaker.sh layout (Zoom left, Wispr right)
 ---
 # Windows: verified 2026-09-11 on a Devin Windows Server 2022 x64 VM (see README "Verified").
 # No reboot was needed: both VB-Audio drivers enumerate right after their silent installer exits.
@@ -140,6 +162,6 @@ knowledge:
       python scripts\listen.py --seconds 15                     # Hi-Fi Cable Output (ffmpeg dshow) -> Scribe transcript of the meeting
   - name: join meeting (child)
     contents: |
-      Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Win"   # then computer use: Join
+      Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Windows%20VM"   # then computer use: Join
       # stuck on the Zoom Workplace sign-in window? re-run Start-Process, then (New-Object -ComObject WScript.Shell).AppActivate('<topic>')
       # preview Audio ^: speaker = Hi-Fi Cable Input (Zoom defaults it to CABLE Input = the mic feed), microphone = CABLE Output
