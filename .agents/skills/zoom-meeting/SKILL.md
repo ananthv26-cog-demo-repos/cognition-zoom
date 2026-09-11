@@ -361,7 +361,11 @@ A prompt like "have 2 Mac VMs and 1 Windows VM join the same Zoom and chat with 
    `wispr`). Start children only after every secret they need is saved (secrets are injected at session start).
    Two things to put in the prompts, both cost turns otherwise: the opener's first listens come back empty while
    the others are still setting up (expected — re-open, don't debug), and the participant-list screenshot must be
-   taken while everyone is still in the meeting, not at the end when children have already left.
+   taken while everyone is still in the meeting, not at the end when children have already left. Close the
+   participants panel again right after that screenshot (see §7).
+   Watch each child's provisioning: a child that only emits `remote_provisioning_status: slow` and no shell
+   activity after ~5 min never got a VM. Terminate it and start a replacement rather than waiting — a
+   2026-09-11 Windows child sat in provisioning for 30+ min and missed the whole meeting.
 4. **Recording:** nobody in the meeting is host so Zoom cloud recording is unavailable — instead designate one
    child (preferably a macOS VM) to record its screen with the built-in tools. Its prompt adds: after joining
    and setting audio, maximize the meeting window and call `recording_start`; during the conversation call
@@ -387,6 +391,9 @@ Rules for a Wispr run (put them in the children's first prompt):
 - Zoom captions **off** (`More (…) > Hide captions` if on). The Wispr live transcript is the proof of speech.
 - Screen split: Zoom meeting window left half, Wispr "Meeting Recorder" (notepad/live transcript) right half —
   `scripts/wispr_notetaker.sh layout`. The recorder child records this layout.
+- Close the Zoom **participants panel** (⌘U, or its X) before `layout` and before `recording_start`, and keep it
+  closed for the rest of the meeting. Docked, it widens the Zoom window over the right half and hides the Wispr
+  live transcript for the whole recording (2026-09-11 run). Open it only for the roster screenshot, then ⌘U again.
 - Credentials: `WISPR_FLOW_EMAIL` / `WISPR_FLOW_PASSWORD` (org secrets). Type them with `printenv X | pbcopy` + ⌘V;
   never echo, log or screenshot them. The same email/password is a throwaway Google account (Google sign-in uses it).
 
@@ -445,8 +452,9 @@ Speaker attribution — what to expect and claim:
   virtual keyboard), "Stop Notetaker when a call ends" on.
 
 Order of operations for a Wispr child: `install` -> `devices` -> `launch` + sign-in + permissions -> test note ->
-join Zoom (§2; mic BlackHole 2ch, speaker BlackHole 16ch, captions off) -> start note -> `layout` -> recorder starts
-recording -> `converse.py` (§5) -> stop note, export -> leave (don't end) -> attach transcript, summary, recording.
+join Zoom (§2; mic BlackHole 2ch, speaker BlackHole 16ch, captions off) -> start note -> close the participants
+panel -> `layout` -> recorder starts recording (do not maximize Zoom on a Wispr run; that hides the transcript) ->
+`converse.py` (§5) -> stop note, export -> leave (don't end) -> attach transcript, summary, recording.
 
 ## Limits
 - Paid host account: no 40-min cap. Free account: 40-min cap on 3+ participant meetings even with no host present.

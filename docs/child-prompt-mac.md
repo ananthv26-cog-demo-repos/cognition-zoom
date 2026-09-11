@@ -24,7 +24,7 @@ You:
 - Voice: `--voice {{Roger | Sarah}}`
 - Others in the meeting: {{"Mac VM 2 (frontend), Windows VM (QA)"}}
 - {{You open the conversation once every name above is in the participant list. | You do not open; you speak when addressed (converse.py answers PASS otherwise).}}
-- {{You are the recorder: maximize the Zoom window (Wispr run: apply the split layout first), `recording_start` before the conversation, `recording_stop` after leaving. | Take screenshots only; another VM records.}}
+- {{You are the recorder: non-Wispr run — maximize the Zoom window; Wispr run — apply the split layout and do NOT maximize Zoom (that covers the transcript). Then `recording_start` before the conversation and `recording_stop` after leaving. | Take screenshots only; another VM records.}}
 
 Preflight (report and stop if any fails; do not join half-configured):
 1. `python3 scripts/converse.py --name "{{name}}" --voice {{voice}} --check` (keys, voice, one model call, ~2 s).
@@ -43,7 +43,9 @@ Conversation (section 5; one process, nothing scripted, you steer it):
 6. `python3 scripts/converse.py --name "{{name}}" --voice {{voice}} --persona ~/persona.md --roster "{{others}}" --steer ~/steer.txt --log ~/turns.jsonl --max-minutes 10 {{--open "Hi everyone, {{name}} here. Quick standup: Mac VM 2, what are you working on?" | (no --open)}}`
    in its own shell with a 12-min timeout. While it runs: `tail -f ~/turns.jsonl`; append lines to ~/steer.txt to
    steer ("ask Windows VM about the release"); append `STOP` to take over with listen.py/speak.py. Screenshot the
-   participant list with every name, and {{the captions panel | Wispr's live transcript}} showing your line and another Devin's line.
+   participant list with every name (open it with Participants/⌘U only if it is closed, then close it again with
+   its X or ⌘U — leaving it docked covers the right half of the screen), and {{the captions panel | Wispr's live
+   transcript}} showing your line and another Devin's line.
 7. Leave (**Leave > Leave meeting**, then `pkill -x zoom.us`). Do NOT end the meeting for everyone.
 
 WISPR (only because the parent prompt says "wispr"; both Mac VMs do this, before step 3):
@@ -59,7 +61,9 @@ WISPR (only because the parent prompt says "wispr"; both Mac VMs do this, before
 - Test before Zoom: menu bar **Notetaker > Start new note**, `say -a "BlackHole 2ch" "Wispr test one two three"`,
   the line appears in the live transcript in ~5 s. Stop the note (green Stop, two clicks; "Keep").
 - After joining Zoom (captions OFF): **Notetaker > Start new note** from the menu bar (do not click toast
-  buttons; they fall through), then `scripts/wispr_notetaker.sh layout` (Zoom left, Meeting Recorder right).
+  buttons; they fall through), then close the Zoom participants panel (⌘U) and run
+  `scripts/wispr_notetaker.sh layout` (Zoom left, Meeting Recorder right). Keep the participants panel closed for
+  the rest of the meeting: docked, it hides Wispr's live transcript in every screenshot and in the recording.
 - After the conversation: Stop the note, wait for the Summary (~20 s) and the refined transcript (~1 min), copy
   each (copy icon) to `~/wispr_transcript.txt` / `~/wispr_summary.txt` via `pbpaste`, attach both. Expect your
   own TTS lines to be labelled "Them" live; that is known and not to be debugged. Report what the refined
