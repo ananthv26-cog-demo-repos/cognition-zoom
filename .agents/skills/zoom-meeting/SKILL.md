@@ -112,7 +112,7 @@ sudo apt-get install -y ~/zoom_amd64.deb                            # ~30 s -> /
 
 # per meeting
 scripts/join_zoom.sh "<join_url_or_web_client_url>" "Devin 2"
-# = scripts/linux_audio.sh (sinks devin_mic + zoom_out, remap source devin_mic_src, set as defaults), then
+# = scripts/linux_audio.sh (sinks devin_mic + zoom_out, remap source devin_mic_src; defaults: sink zoom_out, source devin_mic_src), then
 #   /usr/bin/zoom "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Devin%202"
 ```
 

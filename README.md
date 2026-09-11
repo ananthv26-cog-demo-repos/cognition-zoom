@@ -14,6 +14,7 @@ VMs) join it as named guests through the Zoom desktop app (web client as fallbac
 | `scripts/dismiss_notifications.sh` | macOS: closes every Notification Center banner (Zoom background-activity, Chrome notification prompts) via Accessibility so they do not cover the Zoom window. Run by `join_zoom.sh`; rerun whenever a banner shows up. |
 | `.agents/skills/zoom-meeting/SKILL.md` | Step-by-step skill Devin sessions in this repo auto-load: create, hand off, join, set audio devices. |
 | `docs/wispr-zoom-demo-feasibility.md` | Audio architecture for the Mac VMs (BlackHole, Wispr Flow, realtime voice). |
+| `docs/gotchas.md` | Every symptom -> cause -> fix we hit (API scopes, bot check, arm64 pkg, monitor-source remap, echo loop, notifications...). Read before debugging. |
 
 ## Secrets
 

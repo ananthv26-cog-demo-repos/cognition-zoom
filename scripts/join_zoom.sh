@@ -94,6 +94,7 @@ case "$(uname -s)" in
     fi
     case "$MODE" in
       desktop)
+        [ -x /usr/bin/zoom ] || { echo "zoom binary not found: /usr/bin/zoom (sudo apt-get install -y ./zoom_amd64.deb)" >&2; exit 1; }
         "$HERE/linux_audio.sh" >/dev/null || echo "linux_audio.sh failed; Zoom will report no microphone" >&2
         DEEP="$(deep_link)"
         nohup /usr/bin/zoom "$DEEP" >"$HOME/zoom-desktop.log" 2>&1 &
