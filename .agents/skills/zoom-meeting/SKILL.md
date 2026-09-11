@@ -151,8 +151,10 @@ dismiss the "Cannot detect your camera" banner, **Allow** Chrome's mic prompt. N
 Preferred path: **Zoom desktop app** (guest, no sign-in) with two VB-Audio virtual cables as the BlackHole
 equivalent: **VB-CABLE** carries TTS into the Zoom mic, **Hi-Fi Cable** is the Zoom speaker (distinct device, so
 "Same as System" can never loop meeting audio back into the mic). All PowerShell; the shell is already elevated.
-Verified end to end: guest join with display name, device pickers, Windows TTS moving the mic meter and
-**live captions transcribing it**. The Edge web client is bot-blocked on this VM, so the desktop app is the only path.
+Verified end to end: guest join with display name, device pickers, ElevenLabs `speak.py` captioned by Zoom,
+`listen.py` transcribing another participant verbatim, and `--if-quiet` turn-taking. The Edge web client is
+bot-blocked on this VM, so the desktop app is the only path. `python` (3.12, `C:\devin\python`) and `ffmpeg`
+(chocolatey) are preinstalled on the Devin Windows image; the blueprint only installs ffmpeg if missing.
 
 ```powershell
 # one-time setup (all in the runs-on: windows blueprint doc; ~20 s total, NO reboot needed)
@@ -186,16 +188,21 @@ Then with computer use:
 1. Preview window "Windows spike" shows the pre-filled name and "No camera connected"; click **Join**. If it says
    "Allow Zoom Workplace to access your microphone", desktop-app mic privacy is off: the blueprint sets
    `ConsentStore\microphone` = `Allow` (HKLM + HKCU + `NonPackaged`), or toggle it in Settings > Privacy > Microphone.
-2. **Audio ^ > Audio Settings** (works from the preview too): speaker list `CABLE Input`, `CABLE In 16ch`,
+2. **Audio ^** in the preview (or Audio Settings): speaker list `CABLE Input`, `CABLE In 16ch`,
    `Hi-Fi Cable Input`, `Same as System`; microphone list `CABLE Output`, `Hi-Fi Cable Output`, `Same as System`.
-   Pick **speaker = Hi-Fi Cable Input, microphone = CABLE Output**; Zoom remembers it ("Custom combination").
-3. Speak: `Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("Hello from Devin Windows, testing captions")`
-   (voices: Microsoft David/Zira Desktop; `SetOutputToDefaultAudioDevice()` is the default, i.e. CABLE Input).
-   The **Input Level** meter in Audio Settings lights up green for the phrase. **More (…) > Show captions**
-   transcribes it (verified: "Hello from Devon Windows, testing captions This is Devin Wynne speaking through the
-   virtual cable"; David/Zira mishear names a bit, like espeak on Linux).
-4. Zoom's own output lands on `Hi-Fi Cable Input`; record it from `Hi-Fi Cable Output` if STT of the meeting is needed.
-5. Leave: **Leave > Leave meeting**, then `Get-Process Zoom* | Stop-Process -Force`.
+   Zoom picks up the mic (CABLE Output) from the system default but **defaults the speaker to CABLE Input**, i.e.
+   its own mic feed, so always switch **speaker = Hi-Fi Cable Input** (microphone = CABLE Output); Zoom remembers
+   it ("Custom combination").
+3. Speak: `python scripts\speak.py --voice Roger "Hello from Devin Windows"` (ElevenLabs -> WAV -> `System.Media.SoundPlayer`
+   on the default output = CABLE Input; 4.8 s of audio took 8 s wall). **More (…) > Show captions** transcribes it
+   (verified: "Hello from Devon Windows. This is the ElevenLabs voiced through the virtual cable"). No key -> falls
+   back to `System.Speech` (Microsoft David/Zira; captioned as "Ball Back Windows Voice Test").
+4. Listen: `python scripts\listen.py --seconds 20` / `--until-silence 2 --max 90` record `Hi-Fi Cable Output` via
+   ffmpeg dshow (first frame after ~0.45 s) and post to Scribe; another participant's line came back verbatim.
+   Zoom speech is ~1000-3000 RMS on this cable, silence is 1, so the default `ZOOM_SPEECH_RMS=300` is fine.
+5. Turn-taking: `python scripts\speak.py --if-quiet --max-wait 40 --voice Roger "..."` held off while Devin Linux
+   talked ("someone is talking; waiting for them to finish") and spoke 2 s after the line ended.
+6. Leave: **Leave > Leave meeting**, then `Get-Process Zoom* | Stop-Process -Force`.
 
 Gotchas (details in `docs/gotchas.md`, tag `[win]`):
 - No `winget` on Server 2022; `choco install vb-cable` (pack 43) installs but enumerates nothing — use pack 45.
@@ -203,6 +210,10 @@ Gotchas (details in `docs/gotchas.md`, tag `[win]`):
 - `HiFiCableAsioBridgeSetup.exe -i` is a toggle: guard it with `Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable'`.
 - Zoom desktop keeps retrying "The host has another meeting in progress" by itself and joins as soon as the other
   meeting ends (it did after ~25 min here); `--list-live` from a shell with the secrets tells you which meeting blocks.
+- `ffmpeg` on PATH is a chocolatey *shim* that spawns the real binary; `Popen.kill()` only kills the shim, so
+  `listen.py` uses `taskkill /T /F` on Windows (otherwise 2-4 s stall per capture and a traceback from the reader).
+- dshow device name is exactly `Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)` (`ffmpeg -list_devices true -f dshow -i dummy`);
+  override with `ZOOM_OUT_DSHOW` if it ever differs.
 
 ### Web client comparison on Windows (`Start-Process msedge "https://app.zoom.us/wc/join/<id>?pwd=<enc>"`)
 Does **not** work as a join path: the preview loads (after Edge's one-time welcome wizard and a
@@ -222,10 +233,12 @@ scripts/speak.py --if-quiet --voice Roger "..."    # wait a random 0.5-2 s gap; 
 ```
 
 - `speak.py` plays into the Zoom mic device (Linux `paplay --device=devin_mic`; macOS `afplay`, so system output
-  must be BlackHole 2ch). No key -> falls back to `say -a "BlackHole 2ch"` / `PULSE_SINK=devin_mic espeak-ng`.
+  must be BlackHole 2ch; Windows `System.Media.SoundPlayer` on the default output, which the blueprint sets to
+  CABLE Input). No key -> falls back to `say -a "BlackHole 2ch"` / `PULSE_SINK=devin_mic espeak-ng` / `System.Speech`.
 - `listen.py` records the Zoom speaker device (Linux `zoom_out.monitor`; macOS `BlackHole 16ch` via ffmpeg,
-  `brew install ffmpeg` first) and posts it to Scribe with `keyterms` for our names. Verified on Linux: TTS ->
-  `zoom_out` -> `listen.py` round trip and a real Devin line from the meeting both came back word for word.
+  `brew install ffmpeg` first; Windows `Hi-Fi Cable Output` via ffmpeg dshow, preinstalled) and posts it to Scribe
+  with `keyterms` for our names. Verified on Linux and Windows: a real Devin line from the meeting came back word
+  for word on both.
 - Zoom's *own* captions still write "Devon"/"Kevin": no custom vocabulary there. Accept it: the native captions
   are the visible proof that real speech is reaching Zoom, our Scribe transcript is what a Devin reasons over.
   (A "Devin Captioner" pushing text via the third-party caption token was tried and dropped: Zoom returned 200
@@ -237,8 +250,8 @@ scripts/speak.py --if-quiet --voice Roger "..."    # wait a random 0.5-2 s gap; 
   2. `scripts/speak.py --if-quiet "<reply>"` — synthesises first, then watches the line for a random 0.5-2 s;
      if another Devin got in first it waits for them to finish and re-checks (`--max-wait 30`, then speaks anyway).
   3. Back to 1. Occasional overlap when two Devins both jump in is realistic; don't engineer it away.
-  Verified on Linux with espeak into `zoom_out`: `--until-silence` returned 1.5 s after the line ended and
-  `--if-quiet` held a 4 s talker off then spoke 2 s later. Speech threshold `ZOOM_SPEECH_RMS` (default 300; Zoom
+  Verified on Linux with espeak into `zoom_out` (`--until-silence` returned 1.5 s after the line ended, `--if-quiet`
+  held a 4 s talker off then spoke 2 s later) and live on Windows against a talking Linux participant. Speech threshold `ZOOM_SPEECH_RMS` (default 300; Zoom
   speech is ~1000-4000 RMS). The trio test predates this and used a fixed stagger (Devin n waits (n-1) x 25 s).
 
 ## Limits
