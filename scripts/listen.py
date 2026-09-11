@@ -27,7 +27,9 @@ import uuid
 API = "https://api.elevenlabs.io/v1"
 MODEL = os.environ.get("ELEVENLABS_STT_MODEL", "scribe_v2")
 KEYTERMS = ["Devin", "Devin 1", "Devin 2", "Devin 3", "Cognition", "Wispr Flow", "Zoom"]
-MISHEARD = re.compile(r"\b(Devon|Devan|Deven|Kevin|Divin|Devin's|Devon's)\b(?=\s*(\d|one|two|three|\.|,|!|\?|$|\s))", re.I)
+# Only rewrite when the word is used as one of our participant names ("Kevin 3", "Devon two"), so a real
+# Kevin in ordinary prose is left alone.
+MISHEARD = re.compile(r"\b(Devon|Devan|Deven|Kevin|Divin)('s)?(?=\s+(\d+|one|two|three)\b)", re.I)
 LINUX_SOURCE = os.environ.get("ZOOM_OUT_SOURCE", "zoom_out.monitor")
 
 
@@ -45,7 +47,7 @@ def record(seconds: int, path: str) -> None:
 
 
 def transcribe(path: str) -> dict:
-    key = os.environ.get("ELEVENLABS_API_KEY") or sys.exit("ELEVENLABS_API_KEY not set")
+    key = os.environ["ELEVENLABS_API_KEY"]
     boundary = uuid.uuid4().hex
     parts: list[bytes] = []
 
@@ -73,10 +75,12 @@ def transcribe(path: str) -> dict:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         sys.exit(f"POST /speech-to-text -> HTTP {e.code}: {e.read().decode(errors='replace')[:300]}")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        sys.exit(f"POST /speech-to-text failed: {e}")
 
 
 def fix_names(text: str) -> str:
-    return MISHEARD.sub(lambda m: "Devin's" if m.group(1).lower().endswith("'s") else "Devin", text)
+    return MISHEARD.sub(lambda m: "Devin" + (m.group(2) or ""), text)
 
 
 def main() -> None:
@@ -88,12 +92,21 @@ def main() -> None:
     ap.add_argument("--json", action="store_true", help="print the raw Scribe response")
     a = ap.parse_args()
 
-    path = a.file or a.keep or tempfile.mkstemp(suffix=".wav", prefix="listen-")[1]
-    if a.seconds:
-        record(a.seconds, path)
-    result = transcribe(path)
+    if not os.environ.get("ELEVENLABS_API_KEY"):
+        sys.exit("ELEVENLABS_API_KEY not set (listen.py has no offline STT fallback)")
+
+    tmp = None
     if a.seconds and not a.keep:
-        os.unlink(path)
+        fd, tmp = tempfile.mkstemp(suffix=".wav", prefix="listen-")
+        os.close(fd)
+    path = a.file or a.keep or tmp
+    try:
+        if a.seconds:
+            record(a.seconds, path)
+        result = transcribe(path)
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.unlink(tmp)
 
     if a.json:
         print(json.dumps(result, indent=2))

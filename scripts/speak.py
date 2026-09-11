@@ -47,10 +47,15 @@ def api(method: str, path: str, body: dict | None = None) -> bytes:
             return resp.read()
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"{method} {path} -> HTTP {e.code}: {e.read().decode(errors='replace')[:300]}")
+    except (urllib.error.URLError, OSError) as e:  # DNS, refused, timeout
+        raise RuntimeError(f"{method} {path} failed: {e}")
 
 
 def list_voices() -> list[dict]:
-    return json.loads(api("GET", "/voices"))["voices"]
+    try:
+        return json.loads(api("GET", "/voices"))["voices"]
+    except (ValueError, KeyError) as e:
+        raise RuntimeError(f"GET /voices returned unexpected body: {e}")
 
 
 def resolve_voice(name_or_id: str) -> str:
@@ -84,11 +89,14 @@ def play(wav_path: str) -> None:
 
 def fallback(text: str) -> None:
     if platform.system() == "Darwin":
-        subprocess.run(["say", "-a", "BlackHole 2ch", text], check=False)
+        cmd = ["say", "-a", "BlackHole 2ch", text]
     elif shutil.which("espeak-ng"):
-        subprocess.run(["espeak-ng", text], env={**os.environ, "PULSE_SINK": LINUX_SINK}, check=False)
+        cmd = ["espeak-ng", text]
     else:
         sys.exit("no TTS available (set ELEVENLABS_API_KEY or install espeak-ng)")
+    rc = subprocess.run(cmd, env={**os.environ, "PULSE_SINK": LINUX_SINK}).returncode
+    if rc:
+        sys.exit(f"fallback TTS {cmd[0]} exited {rc}")
 
 
 def main() -> None:
@@ -111,18 +119,26 @@ def main() -> None:
     try:
         wav = tts_wav(a.text, a.voice, a.model)
     except RuntimeError as e:
+        if a.no_play:
+            sys.exit(f"elevenlabs unavailable ({e}); nothing to write")
         print(f"elevenlabs unavailable ({e}); falling back to system TTS", file=sys.stderr)
         fallback(a.text)
         return
 
-    path = a.wav_out or tempfile.mkstemp(suffix=".wav", prefix="speak-")[1]
-    with open(path, "wb") as f:
-        f.write(wav)
-    print(f"{len(wav) // 2 / RATE:.1f}s of audio -> {path}")
-    if not a.no_play:
-        play(path)
-    if not a.wav_out:
-        os.unlink(path)
+    if a.wav_out:
+        path = a.wav_out
+    else:
+        fd, path = tempfile.mkstemp(suffix=".wav", prefix="speak-")
+        os.close(fd)
+    try:
+        with open(path, "wb") as f:
+            f.write(wav)
+        print(f"{len(wav) // 2 / RATE:.1f}s of audio -> {path}")
+        if not a.no_play:
+            play(path)
+    finally:
+        if not a.wav_out:
+            os.unlink(path)
 
 
 if __name__ == "__main__":

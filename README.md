@@ -28,7 +28,8 @@ on a paid personal Zoom account with `meeting:write:meeting:admin` and
 `meeting:read:list_meetings:admin`. No Zoom accounts are needed for the joining Devins.
 
 `ELEVENLABS_API_KEY` (personal, owner: Ananth; key restricted to Text to Speech, Speech to Text,
-Voices read, Models) powers `speak.py` / `listen.py`. Both fall back gracefully without it.
+Voices read, Models) powers `speak.py` / `listen.py`. Without it `speak.py` falls back to the OS voice;
+`listen.py` exits up front (no offline STT).
 
 ## Quick start
 
