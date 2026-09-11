@@ -41,8 +41,8 @@ Facts verified 2026-09-11:
 - The script runs on the macOS system `python3` (3.9) and on Linux.
 
 Hand each child exactly: the meeting `id` + `pwd` (or the URLs above), a display name, and its persona.
-Display names follow a fixed scheme so the roster is readable to a viewer: `Mac 1`, `Mac 2`,
-`Win` (or `Linux 1`, `Linux 2`, ... by OS), and the parent's own seat is `Parent`. Deliberately no
+Display names follow a fixed scheme so the roster is readable to a viewer: `Mac VM 1`, `Mac VM 2`,
+`Windows VM` (or `Linux VM 1`, `Linux VM 2`, ... by OS), and the parent's own seat is `Parent`. Deliberately no
 `Devin` in display names — Zoom captions mishear it ("Devon", "Kevin"); plain OS names transcribe cleanly
 (never "Observer" or bare "Devin 1" — a demo viewer can't tell who those are).
 
@@ -62,10 +62,10 @@ sudo installer -pkg ~/Zoom-arm64.pkg -target /         # ~5 s -> /Applications/z
 
 # per meeting
 SwitchAudioSource -s "BlackHole 2ch"                   # system output -> Zoom mic
-scripts/join_zoom.sh "<web_client_url_or_join_url>" "Mac 1"
+scripts/join_zoom.sh "<web_client_url_or_join_url>" "Mac VM 1"
 # = scripts/dismiss_notifications.sh (closes Notification Center banners), launches
 #   scripts/approve_mic_prompts.sh (auto-clicks Allow on the devin-remote mic TCC dialog), then
-#   open "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Mac%201"
+#   open "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=Mac%20VM%201"
 ```
 
 `join_zoom.sh` waits for the meeting window before returning (same as Linux §3, where it took 28-45 s; the wait
@@ -73,7 +73,7 @@ itself is only verified on Linux), so the first screenshot after it returns show
 
 **Two focus traps, both handled by scripts now:** (a) Zoom always opens a "Zoom Workplace" sign-in/home
 window alongside the join preview — it is a decoy. If a screenshot shows Sign in / Join a meeting instead
-of the join preview or in-meeting toolbar, run `scripts/show_meeting_window.sh "<join_url>" "<topic>" "Mac 1"`
+of the join preview or in-meeting toolbar, run `scripts/show_meeting_window.sh "<join_url>" "<topic>" "Mac VM 1"`
 (raises the meeting window; re-fires the deep link — keeping the roster name — if only the home window exists). Never interact with the
 sign-in page — a guest join needs no account. (b) The macOS TCC dialog "devin-remote would like to access
 the Microphone" blocks the mic path until clicked; `approve_mic_prompts.sh` (auto-started by join_zoom.sh,
@@ -136,7 +136,7 @@ curl -sL -o ~/zoom_amd64.deb https://zoom.us/client/latest/zoom_amd64.deb   # 29
 sudo apt-get install -y ~/zoom_amd64.deb                            # ~30 s -> /usr/bin/zoom (Zoom Workplace 7.1.x)
 
 # per meeting
-scripts/join_zoom.sh "<join_url_or_web_client_url>" "Linux 1"
+scripts/join_zoom.sh "<join_url_or_web_client_url>" "Linux VM 1"
 # = scripts/linux_audio.sh (sinks devin_mic + zoom_out, remap source devin_mic_src; defaults: sink zoom_out, source devin_mic_src), then
 #   /usr/bin/zoom "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=<name>"
 ```
@@ -262,7 +262,7 @@ non-automated Edge — unlike plain Chrome on Linux/macOS. Use the desktop app.
 
 ```bash
 scripts/speak.py --list-voices                     # Roger, Sarah, George, ... (pick one per Devin persona)
-scripts/speak.py --voice Roger "Hi everyone, Mac 2 here. The audio routing is done."
+scripts/speak.py --voice Roger "Hi everyone, Mac VM 2 here. The audio routing is done."
 scripts/listen.py --seconds 15                     # transcript of the meeting audio, "Devin" spelled right
 scripts/listen.py --seconds 15 --json              # words + speaker_id + timestamps
 scripts/listen.py --until-silence 2 --max 90       # block until someone talks and then stops for 2 s
@@ -302,7 +302,7 @@ A prompt like "have 2 Mac VMs and 1 Windows VM join the same Zoom and chat with 
 1. `python3 scripts/zoom_meeting.py --list-live` — end any straggler first (one live meeting per host).
 2. `python3 scripts/zoom_meeting.py --topic "Devin standup" --duration 60 --json` — one meeting for everyone.
 3. Start one child Devin session per participant (`macos` / `windows` / default Linux VM), all on this repo,
-   with a prompt that gives each: display name from the fixed scheme (`Mac 1`, `Mac 2`, `Win`,
+   with a prompt that gives each: display name from the fixed scheme (`Mac VM 1`, `Mac VM 2`, `Windows VM`,
    ...), a persona, an ElevenLabs voice
    (`--voice Roger|Sarah|George|...`), the join URL (Mac/Linux: `scripts/join_zoom.sh "<join_url>" "<name>"`;
    Windows: `Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<enc>&uname=<name>"`), the device checks
@@ -320,7 +320,7 @@ A prompt like "have 2 Mac VMs and 1 Windows VM join the same Zoom and chat with 
    child (preferably a macOS VM) to record its screen with the built-in tools. Its prompt adds: after joining
    and setting audio, maximize the meeting window and call `recording_start`; during the conversation call
    `annotate_recording` — `setup` for join/audio config, `test_start` when its turn begins ("It should give
-   the <persona> standup update"), `assertion` after each spoke/heard turn ("Mac 1's update appeared as
+   the <persona> standup update"), `assertion` after each spoke/heard turn ("Mac VM 1's update appeared as
    captions"), and `recording_stop` (title + summary) right after leaving. The video is the demo evidence.
 5. Optionally join from the parent VM as `Parent` (Linux §3) to screenshot the roster/captions yourself.
 6. When the children report, `python3 scripts/zoom_meeting.py --end <id>` and confirm with `--list-live`.

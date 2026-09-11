@@ -46,9 +46,9 @@ script that implements it is named so nobody has to rediscover it.
 - [all] **Zoom captions write "Devon 1" / "Kevin 3" / "Devin Wan".** Zoom's built-in transcriber has no custom
   vocabulary and mishears the name for both `say` and ElevenLabs voices. Nothing on our side fixes Zoom's
   captions; accept it, the captions exist to prove real speech is reaching Zoom. Our own
-  transcript (`scripts/listen.py`, ElevenLabs Scribe) passes `keyterms=["Devin", "Mac 1", "Win", ...]`
+  transcript (`scripts/listen.py`, ElevenLabs Scribe) passes `keyterms=["Devin", "Mac VM 1", "Windows VM", ...]`
   and gets the spelling right; it also post-fixes Devon/Devan/Kevin -> Devin before a digit or one/two/three.
-  Newer runs sidestep the mishearing entirely: roster names avoid "Devin" ("Mac 1", "Win", "Parent"), so the
+  Newer runs sidestep the mishearing entirely: roster names avoid "Devin" ("Mac VM 1", "Windows VM", "Parent"), so the
   caption label itself is clean and only spoken mentions of Devin can be mangled.
 - [all] **Robotic `say` / `espeak-ng` voices.** `scripts/speak.py` uses ElevenLabs (`eleven_turbo_v2_5`, voice
   names like `Roger`, `Sarah`; `--list-voices`) and writes the returned PCM as a wav so it plays through the same
