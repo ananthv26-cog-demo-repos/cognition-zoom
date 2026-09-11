@@ -11,6 +11,8 @@ VMs) join it as named guests through the Zoom desktop app (web client as fallbac
 | `scripts/zoom_meeting.py` | Server-to-Server OAuth token + `POST /users/{host}/meetings`; prints `join_url`, a web-client URL and a `zoommtg://` deep link. `--end ID` ends it when the demo is over; `--list-live`, `--delete ID` (each needs its scope, see Secrets). |
 | `scripts/join_zoom.sh` | `join_zoom.sh <url> [display name]`. Zoom desktop app via `zoommtg://` when installed (macOS: app matches `uname -m`; Linux: `/usr/bin/zoom`), else a plain Chrome (own profile, no automation flags, so the join is not blocked as a bot). `ZOOM_JOIN_MODE=desktop|chrome|safari` overrides. |
 | `scripts/linux_audio.sh` | Linux BlackHole equivalent: PulseAudio null sinks `DevinMic` (play TTS here) + `ZoomOut` (Zoom speaker) and remap source `DevinMicSrc` (Zoom mic). Idempotent; `join_zoom.sh` runs it before the desktop app. |
+| `scripts/speak.py` | `speak.py "text"`: ElevenLabs TTS (natural voice, `--voice Roger`, `--list-voices`) played into the Zoom mic (`paplay --device=devin_mic` on Linux, `afplay` with system output = BlackHole 2ch on macOS). Falls back to `say -a "BlackHole 2ch"` / `espeak-ng` without `ELEVENLABS_API_KEY`. |
+| `scripts/listen.py` | `listen.py --seconds 15`: records what the meeting says (`zoom_out.monitor` on Linux, `BlackHole 16ch` via ffmpeg on macOS) and transcribes it with ElevenLabs Scribe, `keyterms` biased to "Devin" so names come back right. `--json` gives words + `speaker_id`. |
 | `scripts/dismiss_notifications.sh` | macOS: closes every Notification Center banner (Zoom background-activity, Chrome notification prompts) via Accessibility so they do not cover the Zoom window. Run by `join_zoom.sh`; rerun whenever a banner shows up. |
 | `.agents/skills/zoom-meeting/SKILL.md` | Step-by-step skill Devin sessions in this repo auto-load: create, hand off, join, set audio devices. |
 | `docs/wispr-zoom-demo-feasibility.md` | Audio architecture for the Mac VMs (BlackHole, Wispr Flow, realtime voice). |
@@ -25,6 +27,9 @@ on a paid personal Zoom account with `meeting:write:meeting:admin` and
 `meeting:update:status:admin`, `meeting:delete:meeting:admin` and
 `meeting:read:list_meetings:admin`. No Zoom accounts are needed for the joining Devins.
 
+`ELEVENLABS_API_KEY` (personal, owner: Ananth; key restricted to Text to Speech, Speech to Text,
+Voices read, Models) powers `speak.py` / `listen.py`. Both fall back gracefully without it.
+
 ## Quick start
 
 ```bash
@@ -36,6 +41,9 @@ scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>"
 # child (Linux): desktop app, name pre-filled, mic=DevinMicSrc speaker=ZoomOut; then computer use: Join
 scripts/join_zoom.sh "https://app.zoom.us/wc/join/<id>?pwd=<encrypted_password>" "Devin 2"
 PULSE_SINK=devin_mic espeak-ng "Hello from Devin two"     # or: paplay --device=devin_mic tts.wav
+# any participant: natural voice in, transcript out (needs ELEVENLABS_API_KEY)
+scripts/speak.py --voice Roger "Hi everyone, Devin 2 here."
+scripts/listen.py --seconds 15
 # parent, when done
 python3 scripts/zoom_meeting.py --end <id>
 ```
@@ -80,3 +88,17 @@ python3 scripts/zoom_meeting.py --end <id>
   ("Zoom cannot detect your microphone"); the `module-remap-source` over `devin_mic.monitor`
   in `linux_audio.sh` is what makes `DevinMicSrc` appear. Devices added while Zoom is running
   do show up in the picker.
+- 2026-09-11, **3 macOS Devin VMs in one meeting** (parent on Linux as "Observer", one meeting from
+  the API, three child sessions from the macOS snapshot with Zoom + BlackHole preinstalled):
+
+  | Check | Result |
+  |-------|--------|
+  | Roster | `Observer`, `Devin 1`, `Devin 2`, `Devin 3`, each a separate guest, no Zoom accounts |
+  | Time from session start to "in meeting" | 72 s / 108 s / 146 s |
+  | Devices | mic = BlackHole 2ch, speaker = BlackHole 16ch on all three (Zoom defaulted the speaker to 2ch once; pick 16ch by hand) |
+  | Speech | `say -a "BlackHole 2ch"` on each Mac; plain `say` was **not** heard until `-a` (or `SwitchAudioSource -s "BlackHole 2ch"`) |
+  | Captions | speaker-attributed on every VM ("Devin 1: Quick round of status updates...", "Devin 2: ... Zoom API backend reporting in", "Devin 3: Nothing blocking me") |
+  | Turn-taking | scripted stagger (Devin n waits (n-1) x 25 s after the roster is complete); no overlap |
+  | Name spelling | Zoom's own captions wrote "Devon 1" / "Kevin 3" for `say`, and still "Devon" for an ElevenLabs voice; `listen.py` (Scribe + keyterms) returned "Devin" every time |
+  | `speak.py` (ElevenLabs, Roger) from the Observer | heard by the meeting, captioned |
+  | `listen.py --seconds 75` on the Observer | transcribed a Devin's line from `zoom_out.monitor` |

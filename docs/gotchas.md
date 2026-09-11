@@ -41,6 +41,23 @@ script that implements it is named so nobody has to rediscover it.
 - [all] **Zoom remembers device choices per install** ("Custom audio combination" on the next join), so pick
   mic/speaker once per VM.
 
+## Speech (TTS in, STT out)
+
+- [all] **Zoom captions write "Devon 1" / "Kevin 3" / "Devin Wan".** Zoom's built-in transcriber has no custom
+  vocabulary and mishears the name for both `say` and ElevenLabs voices. Nothing on our side fixes Zoom's
+  captions (options: accept it, or feed Zoom third-party captions via its closed-caption API token). Our own
+  transcript (`scripts/listen.py`, ElevenLabs Scribe) passes `keyterms=["Devin", "Devin 1", ...]` and gets
+  the spelling right; it also post-fixes Devon/Devan/Kevin -> Devin before a digit.
+- [all] **Robotic `say` / `espeak-ng` voices.** `scripts/speak.py` uses ElevenLabs (`eleven_turbo_v2_5`, voice
+  names like `Roger`, `Sarah`; `--list-voices`) and writes the returned PCM as a wav so it plays through the same
+  `paplay --device=devin_mic` / `afplay` path. Without `ELEVENLABS_API_KEY` it falls back to the OS voice, so a
+  demo never goes silent.
+- [all] **Hearing the meeting.** The Zoom *speaker* device is the capture point: Linux `parecord
+  --device=zoom_out.monitor` (Zoom VoiceEngine plays into `zoom_out`), macOS `ffmpeg -f avfoundation -i
+  ":BlackHole 16ch"` (ffmpeg is not preinstalled; `brew install ffmpeg`). `listen.py --seconds N` wraps this.
+- [all] **ElevenLabs voice names carry a description** (`"Roger - Laid-Back, Casual, Resonant"`); match on the part
+  before ` - `. `speak.py --voice` accepts either the short name or a voice_id.
+
 ## macOS audio (BlackHole)
 
 - [mac] **`brew install --cask blackhole-*` says "You must reboot".** Not needed: `sudo killall coreaudiod`
@@ -55,6 +72,10 @@ script that implements it is named so nobody has to rediscover it.
 - [mac] **Routing TTS into Zoom.** `SwitchAudioSource -s "BlackHole 2ch"` makes system output the Zoom mic, so
   plain `say "..."` is heard by Zoom. Pick speaker = BlackHole 16ch in Zoom, *not* "Same as System": with
   system output on BlackHole 2ch, "Same as System" would send the meeting's audio straight back into the mic.
+- [mac] **Plain `say` is silent in the meeting even though system output is BlackHole 2ch** (2 of 3 trio VMs).
+  Use `say -a "BlackHole 2ch" "..."` (explicit audio device); `speak.py` does this in its fallback. Two VMs also
+  found Zoom had defaulted the *speaker* to BlackHole 2ch (= the mic): open Audio ^ and pick 16ch by hand.
+- [mac] **`say` triggers the TCC microphone prompt for devin-remote** the first time audio flows; **Allow**.
 - [mac] **Safari web client shows no mic level on `say`** and offers only "Same as System" for the speaker.
   Treat Safari as join-only; use the desktop app.
 
