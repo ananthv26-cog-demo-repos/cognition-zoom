@@ -21,6 +21,9 @@ URL="${1:?usage: show_meeting_window.sh <zoom url> [window title substring] [dis
 WANT="${2:-}"
 NAME="${3:-}"
 WAIT="${ZOOM_WINDOW_WAIT:-60}"
+# how long a windowless Zoom process is assumed to be starting up before it is
+# treated as an idle background client that needs the deep link again
+GRACE="${ZOOM_START_GRACE:-25}"
 
 MEETING_ID="$(sed -E 's#.*/(j|join)/([0-9]+).*#\2#' <<<"$URL")"
 
@@ -117,16 +120,20 @@ case "$(uname -s)" in
 esac
 
 refired=0
-deadline=$(( $(date +%s) + WAIT ))
+begin="$(date +%s)"
+deadline=$(( begin + WAIT ))
 while :; do
   STATE="$(attempt)"
   case "$STATE" in
     "raised "*) echo "$STATE"; exit 0 ;;
   esac
   now="$(date +%s)"
-  # "starting" means Zoom owns no window yet — waiting is the fix, a second
-  # deep link would only add another instance
-  if [ "$STATE" != starting ] && [ "$refired" = 0 ] && [ -z "${ZOOM_NO_REFIRE:-}" ]; then
+  # "starting" means Zoom owns no window yet: wait out the grace period first, a
+  # second deep link during startup would only add another instance — but a Zoom
+  # left running in the background never grows a window on its own, so re-fire
+  # once the grace period is over
+  if [ "$refired" = 0 ] && [ -z "${ZOOM_NO_REFIRE:-}" ] &&
+     { [ "$STATE" != starting ] || [ $(( now - begin )) -ge "$GRACE" ]; }; then
     refire
     refired=1
     deadline=$(( now + WAIT ))

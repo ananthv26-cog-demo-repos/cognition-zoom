@@ -82,7 +82,7 @@ case "$(uname -s)" in
         DEEP="$(deep_link)"
         open "$DEEP"
         echo "opened zoom.us.app -> $DEEP"
-        ZOOM_NO_REFIRE=1 "$HERE/show_meeting_window.sh" "$URL" "" "$NAME" || true
+        ZOOM_NO_REFIRE=1 "$HERE/show_meeting_window.sh" "$URL" "" "$NAME"
         ;;
       safari)
         open -a Safari "$URL"
@@ -107,7 +107,7 @@ case "$(uname -s)" in
         DEEP="$(deep_link)"
         nohup /usr/bin/zoom "$DEEP" >"$HOME/zoom-desktop.log" 2>&1 &
         echo "launched zoom pid $! -> $DEEP"
-        ZOOM_NO_REFIRE=1 "$HERE/show_meeting_window.sh" "$URL" "" "$NAME" || true
+        ZOOM_NO_REFIRE=1 "$HERE/show_meeting_window.sh" "$URL" "" "$NAME"
         ;;
       chrome)
         BIN="$(ls -d /opt/.devin/chrome/chrome/linux-*/chrome-linux64/chrome 2>/dev/null | head -1 || true)"
