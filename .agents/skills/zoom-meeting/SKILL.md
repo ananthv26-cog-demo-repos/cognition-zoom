@@ -159,10 +159,13 @@ Verified end to end: guest join with display name, device pickers, Windows TTS m
 Set-Service AudioEndpointBuilder -StartupType Automatic; Start-Service AudioEndpointBuilder   # VM boots with audio
 Set-Service Audiosrv -StartupType Automatic; Start-Service Audiosrv                           # services disabled
 Install-Module AudioDeviceCmdlets -Force -Scope CurrentUser                                   # Get-/Set-AudioDevice
-curl.exe -sL -o $HOME\VBCABLE_Driver_Pack45.zip https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
-Expand-Archive -Force $HOME\VBCABLE_Driver_Pack45.zip $HOME\vbcable45
-Start-Process -Wait $HOME\vbcable45\VBCABLE_Setup_x64.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\vbcable45   # 1-9 s
-if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -ErrorAction SilentlyContinue)) {  # any node, OK or not: -i on an installed one REMOVES it
+# both installers' -i switch TOGGLES: guard on any PnP node (OK or not) so a rerun never uninstalls a cable
+if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Virtual Cable' -ErrorAction SilentlyContinue)) {
+  curl.exe -sL -o $HOME\VBCABLE_Driver_Pack45.zip https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
+  Expand-Archive -Force $HOME\VBCABLE_Driver_Pack45.zip $HOME\vbcable45
+  Start-Process -Wait $HOME\vbcable45\VBCABLE_Setup_x64.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\vbcable45   # 1-9 s
+}
+if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -ErrorAction SilentlyContinue)) {
   $trust = "Cert:\LocalMachine\TrustedPublisher\$((Get-PfxCertificate scripts\windows\vb-audio-driver-signer.cer).Thumbprint)"
   $addedTrust = -not (Test-Path $trust)
   try {
