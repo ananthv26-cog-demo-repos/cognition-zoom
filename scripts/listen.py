@@ -82,7 +82,8 @@ class Capture:
                    f"--rate={RATE}", "--latency-msec=100"]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         self.q: queue.Queue[bytes | None] = queue.Queue()
-        threading.Thread(target=self._pump, daemon=True).start()
+        self.pump = threading.Thread(target=self._pump, daemon=True)
+        self.pump.start()
 
     def _pump(self) -> None:
         while True:
@@ -112,8 +113,14 @@ class Capture:
         return self
 
     def __exit__(self, *exc) -> None:
-        self.proc.kill()
+        if platform.system() == "Windows":
+            # ffmpeg on PATH is usually a chocolatey shim: kill the tree so the real recorder goes with it
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(self.proc.pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            self.proc.kill()
         self.proc.wait()
+        self.pump.join(timeout=2)  # let the reader see EOF before its pipe is closed under it
         self.proc.stdout.close()
 
 
