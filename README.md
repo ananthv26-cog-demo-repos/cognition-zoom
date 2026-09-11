@@ -46,7 +46,7 @@ PULSE_SINK=devin_mic espeak-ng "Hello from Devin two"     # or: paplay --device=
 # child (Windows, PowerShell): desktop app, name pre-filled, mic=CABLE Output speaker=Hi-Fi Cable Input; then computer use: Join
 #   Start-Process "zoommtg://zoom.us/join?confno=<id>&pwd=<encrypted_password>&uname=Devin%20Win"
 #   Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("Hello from Devin Win")
-# any participant: natural voice in, transcript out (needs ELEVENLABS_API_KEY)
+# any macOS/Linux participant: natural voice in, transcript out (needs ELEVENLABS_API_KEY; no Windows port yet, Windows uses System.Speech above)
 scripts/speak.py --voice Roger "Hi everyone, Devin 2 here."
 scripts/listen.py --seconds 15
 # parent, when done
