@@ -73,16 +73,18 @@ EOF
   Linux)
     export DISPLAY="${DISPLAY:-:0}"
     FOUND=""
-    if [ -n "$WANT" ] && wmctrl -l | grep -F "$WANT" | grep -vF "Zoom Workplace" >/dev/null; then
-      wmctrl -a "$WANT"; FOUND="$WANT"
-    else
+    pick() {  # $1 = title substring to prefer ("" = any non-home zoom window)
       while IFS= read -r line; do
-        wid="${line%% *}"
-        title="${line#* * * }"   # wmctrl -l columns: winid desktop host title
+        local wid="${line%% *}" title="${line#* * * }"   # wmctrl -l: winid desktop host title
         case "$title" in *"Zoom Workplace"*) continue;; esac
-        wmctrl -i -a "$wid" && FOUND="$title" && break
+        [ -n "$1" ] && ! grep -qF -- "$1" <<<"$title" && continue
+        wmctrl -i -a "$wid" && { FOUND="$title"; return 0; }
       done < <(wmctrl -l | grep -i zoom)
-    fi
+      return 1
+    }
+    # raise by window ID, never by title: wmctrl -a does its own substring match
+    # and could pick the home window when both titles contain WANT
+    pick "$WANT" || pick ""
     if [ -z "$FOUND" ]; then
       nohup /usr/bin/zoom "$(deep_link)" >"$HOME/zoom-desktop.log" 2>&1 &
       echo "re-fired join deep link for meeting $MEETING_ID"
