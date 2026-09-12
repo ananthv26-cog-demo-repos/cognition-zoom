@@ -202,16 +202,28 @@ bot-blocked on this VM, so the desktop app is the only path. `python` (3.12, `C:
 Set-Service AudioEndpointBuilder -StartupType Automatic; Start-Service AudioEndpointBuilder   # VM boots with audio
 Set-Service Audiosrv -StartupType Automatic; Start-Service Audiosrv                           # services disabled
 Install-Module AudioDeviceCmdlets -Force -Scope CurrentUser                                   # Get-/Set-AudioDevice
-curl.exe -sL -o $HOME\VBCABLE_Driver_Pack45.zip https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
-Expand-Archive -Force $HOME\VBCABLE_Driver_Pack45.zip $HOME\vbcable45
-Start-Process -Wait $HOME\vbcable45\VBCABLE_Setup_x64.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\vbcable45   # 1-9 s
-certutil -addstore -f TrustedPublisher scripts\windows\vb-audio-driver-signer.cer             # else a driver-trust dialog; blueprint removes it after the install
-curl.exe -sL -o $HOME\HiFiCable.zip https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip
-Expand-Archive -Force $HOME\HiFiCable.zip $HOME\hificable
-if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -Status OK -ErrorAction SilentlyContinue)) {  # -i on an installed one REMOVES it
-  Start-Process -Wait $HOME\hificable\HiFiCableAsioBridgeSetup.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\hificable  # 1.5 s
+# both installers' -i switch TOGGLES: guard on any PnP node (OK or not) so a rerun never uninstalls a cable
+if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Virtual Cable' -ErrorAction SilentlyContinue)) {
+  curl.exe -sL -o $HOME\VBCABLE_Driver_Pack45.zip https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip
+  Expand-Archive -Force $HOME\VBCABLE_Driver_Pack45.zip $HOME\vbcable45
+  Start-Process -Wait $HOME\vbcable45\VBCABLE_Setup_x64.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\vbcable45   # 1-9 s
 }
-Remove-Item "Cert:\LocalMachine\TrustedPublisher\$((Get-PfxCertificate scripts\windows\vb-audio-driver-signer.cer).Thumbprint)"  # trust only needed for the install
+if (-not (Get-PnpDevice -Class MEDIA -FriendlyName 'VB-Audio Hi-Fi Cable' -ErrorAction SilentlyContinue)) {
+  $trust = "Cert:\LocalMachine\TrustedPublisher\$((Get-PfxCertificate scripts\windows\vb-audio-driver-signer.cer).Thumbprint)"
+  $addedTrust = -not (Test-Path $trust)
+  try {
+    if ($addedTrust) { certutil -addstore -f TrustedPublisher scripts\windows\vb-audio-driver-signer.cer }   # else a driver-trust dialog
+    curl.exe -sL -o $HOME\HiFiCable.zip https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip
+    Expand-Archive -Force $HOME\HiFiCable.zip $HOME\hificable
+    Start-Process -Wait $HOME\hificable\HiFiCableAsioBridgeSetup.exe -ArgumentList '-i','-h' -WorkingDirectory $HOME\hificable  # 1.5 s
+  } finally { if ($addedTrust -and (Test-Path $trust)) { Remove-Item $trust } }   # trust only needed for the install; keep it if it was already there
+}
+foreach ($name in 'VB-Audio Virtual Cable', 'VB-Audio Hi-Fi Cable') {
+  $dev = @(Get-PnpDevice -Class MEDIA -FriendlyName $name -ErrorAction SilentlyContinue)
+  if (-not $dev) { throw "$name missing; re-run the setup" }
+  $bad = @($dev | Where-Object Status -ne 'OK')
+  if ($bad) { throw "$name not healthy: pnputil /remove-device $($bad.InstanceId -join ' '), then re-run" }
+}
 curl.exe -sL -o $HOME\Zoom-x64.msi "https://zoom.us/client/latest/ZoomInstallerFull.msi?archType=x64"   # 212 MB; unsuffixed = 32-bit
 Start-Process -Wait msiexec -ArgumentList '/i',"$HOME\Zoom-x64.msi",'/qn','/norestart'          # 20 s -> C:\Program Files\Zoom\bin\Zoom.exe
 
