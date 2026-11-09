@@ -239,8 +239,8 @@ Then with computer use:
    it ("Custom combination").
 3. Speak: `python scripts\speak.py --voice Roger "Hello from Devin Windows"` (ElevenLabs -> WAV -> `System.Media.SoundPlayer`
    on the default output = CABLE Input; 4.8 s of audio took 8 s wall). **More (…) > Show captions** transcribes it
-   (verified: "Hello from Devon Windows. This is the ElevenLabs voiced through the virtual cable"). No key -> falls
-   back to `System.Speech` (Microsoft David/Zira; captioned as "Ball Back Windows Voice Test").
+   (verified: "Hello from Devon Windows. This is the ElevenLabs voiced through the virtual cable"). No key -> exits
+   non-zero (no `System.Speech` fallback).
 4. Listen: `python scripts\listen.py --seconds 20` / `--until-silence 2 --max 90` record `Hi-Fi Cable Output` via
    ffmpeg dshow (first frame after ~0.45 s) and post to Scribe; another participant's line came back verbatim.
    Zoom speech is ~1000-3000 RMS on this cable, silence is 1, so the default `ZOOM_SPEECH_RMS=300` is fine.
@@ -312,7 +312,7 @@ scripts/speak.py --if-quiet --voice Roger "..."    # wait a random 0.5-2 s gap; 
 
 - `speak.py` plays into the Zoom mic device (Linux `paplay --device=devin_mic`; macOS `afplay`, so system output
   must be BlackHole 2ch; Windows `System.Media.SoundPlayer` on the default output, which the blueprint sets to
-  CABLE Input). No key -> falls back to `say -a "BlackHole 2ch"` / `PULSE_SINK=devin_mic espeak-ng` / `System.Speech`.
+  CABLE Input). `ELEVENLABS_API_KEY` is required: no key or a failed API call -> exits non-zero (no system-TTS fallback).
 - Opening the capture device is slow on the first call (~2 s on Linux, longer for ffmpeg/BlackHole on macOS, where
   it used to fail the whole listen with "recorder produced no audio for 3 s"). `listen.py` now waits
   `ZOOM_CAPTURE_START_TIMEOUT` (default 12 s) for the first frame and only then starts the `--max` clock, so a cold

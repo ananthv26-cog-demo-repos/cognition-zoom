@@ -14,8 +14,8 @@ Audio path (same devices join_zoom.sh sets up):
   linux:   paplay --device=devin_mic <wav>          (DevinMicSrc is Zoom's mic)
   macos:   afplay <wav>  with system output = BlackHole 2ch (SwitchAudioSource -s "BlackHole 2ch")
   windows: System.Media.SoundPlayer <wav> on the default output = CABLE Input (the blueprint sets it; Zoom mic = CABLE Output)
-Falls back to espeak-ng / say / System.Speech when ELEVENLABS_API_KEY is unset or the API call fails, so a demo never
-goes silent. Stdlib only.
+ELEVENLABS_API_KEY is required: ElevenLabs is the only TTS path, and speak.py exits non-zero if the key is unset or
+the API call fails. Stdlib only.
 """
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ import json
 import os
 import platform
 import random
-import shutil
 import struct
 import subprocess
 import sys
@@ -133,26 +132,6 @@ def wait_for_turn(max_wait: float) -> None:
     print(f"still busy after {max_wait:g}s; speaking anyway", file=sys.stderr)
 
 
-def fallback(text: str) -> None:
-    if platform.system() == "Darwin":
-        arm_mic_approver()   # say -a raises the same devin-remote mic TCC prompt
-        cmd = ["say", "-a", "BlackHole 2ch", text]
-    elif platform.system() == "Windows":
-        try:
-            ps("Add-Type -AssemblyName System.Speech; "
-               f"(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak({ps_quote(text)})")
-        except subprocess.CalledProcessError as e:
-            sys.exit(f"fallback TTS System.Speech exited {e.returncode}")
-        return
-    elif shutil.which("espeak-ng"):
-        cmd = ["espeak-ng", text]
-    else:
-        sys.exit("no TTS available (set ELEVENLABS_API_KEY or install espeak-ng)")
-    rc = subprocess.run(cmd, env={**os.environ, "PULSE_SINK": LINUX_SINK}).returncode
-    if rc:
-        sys.exit(f"fallback TTS {cmd[0]} exited {rc}")
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("text", nargs="?")
@@ -177,13 +156,7 @@ def main() -> None:
     try:
         wav = tts_wav(a.text, a.voice, a.model)
     except RuntimeError as e:
-        if a.no_play:
-            sys.exit(f"elevenlabs unavailable ({e}); nothing to write")
-        print(f"elevenlabs unavailable ({e}); falling back to system TTS", file=sys.stderr)
-        if a.if_quiet:
-            wait_for_turn(a.max_wait)
-        fallback(a.text)
-        return
+        sys.exit(f"elevenlabs unavailable ({e})")
 
     if a.wav_out:
         path = a.wav_out

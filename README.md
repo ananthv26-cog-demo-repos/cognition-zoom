@@ -12,7 +12,7 @@ Windows VMs) join it as named guests through the Zoom desktop app (web client as
 | `scripts/join_zoom.sh` | `join_zoom.sh <url> [display name]`. Zoom desktop app via `zoommtg://` when installed (macOS: app matches `uname -m`; Linux: `/usr/bin/zoom`), else a plain Chrome (own profile, no automation flags, so the join is not blocked as a bot). `ZOOM_JOIN_MODE=desktop|chrome|safari` overrides. |
 | `scripts/linux_audio.sh` | Linux BlackHole equivalent: PulseAudio null sinks `DevinMic` (play TTS here) + `ZoomOut` (Zoom speaker) and remap source `DevinMicSrc` (Zoom mic). Idempotent; `join_zoom.sh` runs it before the desktop app. |
 | `scripts/windows/vb-audio-driver-signer.cer` | VB-Audio's public code-signing certificate (exported from the Hi-Fi Cable driver `.cat`). `certutil -addstore TrustedPublisher` it so the Hi-Fi Cable driver installs without the "Windows Security" publisher dialog (the blueprint removes the trust again after the install). Windows has no `join_zoom.sh`: the `zoommtg://` deep link is the whole join (skill section 4). |
-| `scripts/speak.py` | `speak.py "text"`: ElevenLabs TTS (natural voice, `--voice Roger`, `--list-voices`) played into the Zoom mic (`paplay --device=devin_mic` on Linux, `afplay` with system output = BlackHole 2ch on macOS, `System.Media.SoundPlayer` with system output = CABLE Input on Windows). Falls back to `say -a "BlackHole 2ch"` / `espeak-ng` / `System.Speech` without `ELEVENLABS_API_KEY`. `--if-quiet` waits for a gap in the meeting audio (random 0.5-2 s, backs off if someone else starts). |
+| `scripts/speak.py` | `speak.py "text"`: ElevenLabs TTS (natural voice, `--voice Roger`, `--list-voices`) played into the Zoom mic (`paplay --device=devin_mic` on Linux, `afplay` with system output = BlackHole 2ch on macOS, `System.Media.SoundPlayer` with system output = CABLE Input on Windows). Requires `ELEVENLABS_API_KEY` (no system-TTS fallback; exits non-zero without it). `--if-quiet` waits for a gap in the meeting audio (random 0.5-2 s, backs off if someone else starts). |
 | `scripts/listen.py` | `listen.py --seconds 15`: records what the meeting says (`zoom_out.monitor` on Linux, `BlackHole 16ch` via ffmpeg on macOS, `Hi-Fi Cable Output` via ffmpeg dshow on Windows) and transcribes it with ElevenLabs Scribe, `keyterms` biased to "Devin" so names come back right. `--json` gives words + `speaker_id`. `--until-silence 2` blocks until the current speaker has paused for 2 s (turn-taking). |
 | `scripts/converse.py` | The conversation loop in one process: listen (`--silence` 1.2 s) -> Scribe -> chat model on Fireworks (`FIREWORKS_API_KEY`, `ZOOM_LLM_MODEL`, default GLM 5.3 fast, ~1 s) -> ElevenLabs -> speak in the next gap, ~6-9 s per turn instead of a 20-40 s agent step. Every line is generated live from `--persona`, `--roster`, the running transcript and a `--steer` file Devin edits between turns (a line `STOP` hands control back to `listen.py`/`speak.py`); the model may answer `PASS` (stay quiet) or end with `DONE`. `--log turns.jsonl` records heard/said/pass with timestamps; `--check` is a 2 s preflight of keys, voice and model. |
 | `scripts/wispr_notetaker.sh` | macOS, **opt-in (only when the prompt says "wispr")**: `install` (Wispr Flow + Chrome casks, Chrome as default browser, click-to-show-desktop off), `devices` (system in/out -> BlackHole 2ch), `launch`, `authdb grant|restore` (the Accessibility toggle's password prompt), `layout` (Zoom left, Wispr Meeting Recorder right), `status`. Sign-in and permissions stay interactive; nothing runs unless invoked. Skill section 7. |
@@ -31,8 +31,8 @@ on a paid personal Zoom account with `meeting:write:meeting:admin` and
 `meeting:read:list_meetings:admin`. No Zoom accounts are needed for the joining Devins.
 
 `ELEVENLABS_API_KEY` (personal, owner: Ananth; key restricted to Text to Speech, Speech to Text,
-Voices read, Models) powers `speak.py` / `listen.py`. Without it `speak.py` falls back to the OS voice;
-`listen.py` exits up front (no offline STT).
+Voices read, Models) powers `speak.py` / `listen.py` and is required by both: without it `speak.py` exits non-zero (no
+system-TTS fallback) and `listen.py` exits up front (no offline STT).
 
 `FIREWORKS_API_KEY` (org) is the chat model behind `converse.py`; there is no other LLM backend.
 `WISPR_FLOW_EMAIL` / `WISPR_FLOW_PASSWORD` (org) are only touched in a "wispr" run (Google sign-in on the
@@ -163,7 +163,7 @@ python3 scripts/zoom_meeting.py --end <id>
   | dshow device | exactly `Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)`; `listen.py` default, no `ZOOM_OUT_DSHOW` needed |
   | Join | `zoommtg://` deep link, preview, Join; mic = CABLE Output picked up from the system default, speaker had to be switched from CABLE Input to Hi-Fi Cable Input |
   | `speak.py --voice Roger` | 4.8 s of audio in 8 s wall; Zoom captions: "Hello from Devon Windows. This is the ElevenLabs voiced through the virtual cable" |
-  | `speak.py` without key | `System.Speech` fallback captioned as "Ball Back Windows Voice Test" |
+  | `speak.py` without key | `System.Speech` fallback captioned as "Ball Back Windows Voice Test" (fallback since removed; `speak.py` now requires the key) |
   | `listen.py --seconds 20` | "Devin Linux here. Message eight. Devin 1, Devin 2, and Devin 3 will join from macOS in the next run" (verbatim) |
   | `listen.py --until-silence 2 --max 90` | returned 2 s after the Linux line ended, 7.7 s wav, transcript verbatim |
   | RMS on Hi-Fi Cable | Zoom speech 1079-3060 per second (~2200), silence 1; default `ZOOM_SPEECH_RMS=300` holds |

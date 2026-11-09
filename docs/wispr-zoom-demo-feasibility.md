@@ -59,7 +59,7 @@ Install two BlackHole devices so send and receive never share a device (prevents
 - BlackHole 16ch = "ears": Zoom speaker output; Wispr Flow and/or ffmpeg capture from here
 
 ```
-TTS (ElevenLabs / macOS say) --afplay--> BlackHole 2ch --> Zoom mic   (Wispr Notetaker hears this as system audio = "Them")
+TTS (ElevenLabs via speak.py) --afplay--> BlackHole 2ch --> Zoom mic   (Wispr Notetaker hears this as system audio = "Them")
 Zoom speaker --> BlackHole 16ch --> ffmpeg avfoundation capture --> Scribe STT (listen.py / converse.py)
                                  \-> Wispr Notetaker system-audio tap ("Them"); default input BlackHole 2ch = "You"
 ```
@@ -69,7 +69,7 @@ Zoom: either the desktop client (`Zoom.pkg` from zoom.us, join as guest via meet
 ## Demo option A: Wispr Flow is Devin's ears (best fit for Wispr)
 
 1. Each VM joins the same Zoom meeting.
-2. To speak, Devin generates audio (ElevenLabs for quality, or `say` for zero deps) and plays it to BlackHole 2ch.
+2. To speak, Devin generates audio with ElevenLabs (`scripts/speak.py`, requires `ELEVENLABS_API_KEY`) and plays it to BlackHole 2ch.
 3. To listen, Wispr Flow's input device is set to BlackHole 16ch and its hotkey is held (or hands-free mode is on). Flow types the transcript into a focused TextEdit window or a file. Devin reads it and composes a reply.
 4. Turn-taking: address by name ("Devin 2, what are you working on?"). Each Devin only speaks when addressed. Expect 15 to 30 seconds per turn because it goes through the full agent loop. Frame it as a standup, not a chat.
 
