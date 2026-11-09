@@ -112,7 +112,7 @@ class Conversation:
     def __init__(self, a: argparse.Namespace) -> None:
         self.a = a
         self.transcript: list[tuple[str, str]] = []  # ("You" | "Them", text)
-        self.voice_id = speak.resolve_voice(a.voice) if os.environ.get("ELEVENLABS_API_KEY") else None
+        self.voice_id = speak.resolve_voice(a.voice)
         self.said = 0
         self.log = open(a.log, "a", encoding="utf-8") if a.log else None
 
@@ -148,13 +148,10 @@ class Conversation:
             self.record("info", "model signalled DONE without a goodbye line")
             raise SystemExit(0)
         try:
-            if self.voice_id is None:
-                raise RuntimeError("ELEVENLABS_API_KEY not set")
             wav = speak.tts_wav(text, self.voice_id, self.a.model)
         except RuntimeError as e:
-            self.record("warn", f"elevenlabs unavailable ({e}); system TTS")
-            speak.wait_for_turn(self.a.max_wait)
-            speak.fallback(text)
+            self.record("error", f"elevenlabs unavailable ({e}); exiting")
+            raise SystemExit(f"elevenlabs unavailable ({e})")
         else:
             fd, path = tempfile.mkstemp(suffix=".wav", prefix="converse-")
             os.close(fd)
@@ -249,7 +246,7 @@ def main() -> None:
     if a.max_turns < 1 or a.stall_after < 1:
         ap.error("--max-turns and --stall-after must be >= 1")
     if not os.environ.get("ELEVENLABS_API_KEY"):
-        sys.exit("ELEVENLABS_API_KEY not set (listen.py has no offline STT)")
+        sys.exit("ELEVENLABS_API_KEY not set (required for listen.py STT and speak.py TTS)")
     if not os.environ.get("FIREWORKS_API_KEY"):
         sys.exit("FIREWORKS_API_KEY not set (the reply for each turn comes from a chat model)")
     if a.check:
