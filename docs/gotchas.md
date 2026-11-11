@@ -15,7 +15,8 @@ script that implements it is named so nobody has to rediscover it.
 - [api] **HTTP 400, Zoom code 4711 ("Invalid access token, does not contain scopes ...").** The S2S app lacks the
   scope for that endpoint. Add it in Marketplace > Scopes and re-Activate; credentials stay the same. Needed set:
   `meeting:write:meeting:admin`, `meeting:read:meeting:admin`, `meeting:update:status:admin` (`--end`),
-  `meeting:delete:meeting:admin` (`--delete`), `meeting:read:list_meetings:admin` (`--list-live`).
+  `meeting:delete:meeting:admin` (`--delete`), `meeting:read:list_meetings:admin` (`--list-live`);
+  `meeting:read:past_meeting:admin` + `report:read:list_meeting_participants:admin` (`meeting_report.py`).
 - [api] **"The host has another meeting in progress" when a child joins.** One live meeting per host account. A
   join-before-host meeting stays "in progress" as long as any guest is connected, even with no host. Fix: all
   Devins join the *same* meeting; the parent runs `zoom_meeting.py --end <id>` when done and `--list-live` to
