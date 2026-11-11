@@ -9,6 +9,7 @@ Windows VMs) join it as named guests through the Zoom desktop app (web client as
 | Path | Purpose |
 |------|---------|
 | `scripts/zoom_meeting.py` | Server-to-Server OAuth token + `POST /users/{host}/meetings`; prints `join_url`, a web-client URL and a `zoommtg://` deep link. `--end ID` ends it when the demo is over; `--list-live`, `--delete ID` (each needs its scope, see Secrets). |
+| `scripts/meeting_report.py` | Post-meeting report: `meeting_report.py MEETING_ID [--json]` prints topic, start/end, duration, unique participant count and every join/leave record (`GET /past_meetings/{id}` + paginated `GET /report/meetings/{id}/participants`). Same `ZOOM_S2S_*` / `ZOOM_HOST_EMAIL` env vars as `zoom_meeting.py`; needs scopes `meeting:read:past_meeting:admin` and `report:read:list_meeting_participants:admin` (see Secrets). The meeting must have ended. `--check` is a preflight of env vars, token and granted scopes. |
 | `scripts/join_zoom.sh` | `join_zoom.sh <url> [display name]`. Zoom desktop app via `zoommtg://` when installed (macOS: app matches `uname -m`; Linux: `/usr/bin/zoom`), else a plain Chrome (own profile, no automation flags, so the join is not blocked as a bot). `ZOOM_JOIN_MODE=desktop|chrome|safari` overrides. |
 | `scripts/linux_audio.sh` | Linux BlackHole equivalent: PulseAudio null sinks `DevinMic` (play TTS here) + `ZoomOut` (Zoom speaker) and remap source `DevinMicSrc` (Zoom mic). Idempotent; `join_zoom.sh` runs it before the desktop app. |
 | `scripts/windows/vb-audio-driver-signer.cer` | VB-Audio's public code-signing certificate (exported from the Hi-Fi Cable driver `.cat`). `certutil -addstore TrustedPublisher` it so the Hi-Fi Cable driver installs without the "Windows Security" publisher dialog (the blueprint removes the trust again after the install). Windows has no `join_zoom.sh`: the `zoommtg://` deep link is the whole join (skill section 4). |
@@ -28,7 +29,8 @@ Personal Devin secrets (owner: Ananth): `ZOOM_S2S_ACCOUNT_ID`, `ZOOM_S2S_CLIENT_
 on a paid personal Zoom account with `meeting:write:meeting:admin` and
 `meeting:read:meeting:admin` scopes (create). `--end`, `--delete` and `--list-live` also need
 `meeting:update:status:admin`, `meeting:delete:meeting:admin` and
-`meeting:read:list_meetings:admin`. No Zoom accounts are needed for the joining Devins.
+`meeting:read:list_meetings:admin`. `meeting_report.py` needs `meeting:read:past_meeting:admin` and
+`report:read:list_meeting_participants:admin`. No Zoom accounts are needed for the joining Devins.
 
 `ELEVENLABS_API_KEY` (personal, owner: Ananth; key restricted to Text to Speech, Speech to Text,
 Voices read, Models) powers `speak.py` / `listen.py`. Without it `speak.py` falls back to the OS voice;
