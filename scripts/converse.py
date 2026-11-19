@@ -52,12 +52,18 @@ Answer format: think as much as you like, then the LAST line of your answer must
 
 
 def llm(messages: list[dict]) -> str:
+    return spoken_line(chat(messages))
+
+
+def chat(messages: list[dict], max_tokens: int = 600, temperature: float = 0.9) -> str:
+    """Raw `content` of one Fireworks chat completion (may be empty for reasoning models)."""
     key = os.environ.get("FIREWORKS_API_KEY")
     if not key:
         raise RuntimeError("FIREWORKS_API_KEY not set")
     req = urllib.request.Request(
         f"{LLM_API}/chat/completions",
-        data=json.dumps({"model": MODEL, "messages": messages, "max_tokens": 600, "temperature": 0.9}).encode(),
+        data=json.dumps({"model": MODEL, "messages": messages, "max_tokens": max_tokens,
+                         "temperature": temperature}).encode(),
         method="POST",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
@@ -73,7 +79,7 @@ def llm(messages: list[dict]) -> str:
         content = msg.get("content") or ""
     except (KeyError, IndexError, TypeError, AttributeError):
         raise RuntimeError(f"chat/completions: unexpected body {json.dumps(body)[:300]}")
-    return spoken_line(content)
+    return content
 
 
 def spoken_line(content: str) -> str:
